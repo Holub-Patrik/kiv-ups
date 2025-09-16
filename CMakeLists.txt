@@ -110,6 +110,7 @@ if (NOT raylib_cpp_FOUND)
         raylib_cpp
         GIT_REPOSITORY https://github.com/RobLoach/raylib-cpp.git
         GIT_TAG v5.5.0
+        GIT_SHALLOW 1
     )
     FetchContent_MakeAvailable(raylib_cpp)
 else()
