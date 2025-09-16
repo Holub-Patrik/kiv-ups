@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 4.0)
 
-project(poker)
+project(kiv-ups)
+
+option(ASAN "Use address sanitizer" OFF)
+option(MSAN "Use memory sanitizer" OFF)
+option(TSAN "Use thread sanitizer" OFF)
+option(UBSAN "Use undefined behaviour sanitizer" OFF)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message("-- Clang detected, using libc++")
@@ -8,6 +13,9 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
 endif()
 
+# test for unix with wayland environment
+# I am testing this, since most wayland instalations also have xwayland
+# in such a case x11 gets found and raylib uses X11
 if(UNIX)
     message("-- Found unix environment, trying if Wayland present")
     find_package(ECM REQUIRED NO_MODULE QUIET)
@@ -16,18 +24,47 @@ if(UNIX)
     find_package(Wayland QUIET)
     if(Wayland_FOUND)
         message("-- Wayland found, setting GLFW_BUILD_WAYLAND to ON")
-        set(CUSTOMIZE_BUILD ON)
-        set(GLFW_BUILD_WAYLAND ON)
+        set(CUSTOMIZE_BUILD ON CACHE BOOL "Enable custom build options for Raylib")
+        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "Build bundled GLFW with Wayland support")
+        set(GLFW_BUILD_X11 OFF CACHE BOOL "Disable bundled GLFW with X11 support")
     else()
         message("-- Wayland not found, moving on ...")
     endif()
+endif()
+
+# sanitizer options for raylib
+if(ASAN)
+    if(NOT CUSTOMIZE_BUILD)
+        set(CUSTOMIZE_BUILD ON CACHE BOOL "Enable custom build options for Raylib")
+    endif()
+
+    set(ENABLE_ASAN ON CACHE BOOL "Enable address sanitizer for Raylib")
+endif()
+
+if(UBSAN)
+    if(NOT CUSTOMIZE_BUILD)
+        set(CUSTOMIZE_BUILD ON CACHE BOOL "Enable custom build options for Raylib")
+    endif()
+
+    set(ENABLE_UBSAN ON CACHE BOOL "Enable undefined behaviour sanitizer for Raylib")
+endif()
+
+if(MSAN)
+    if(NOT CUSTOMIZE_BUILD)
+        set(CUSTOMIZE_BUILD ON CACHE BOOL "Enable custom build options for Raylib")
+    endif()
+
+    set(ENABLE_MSAN ON CACHE BOOL "Enable memory sanitizer for Raylib")
 endif()
 
 function(apply_common_settings TARGET)
     target_compile_features(${TARGET} PRIVATE cxx_std_26)
 
     target_compile_options(${TARGET} PRIVATE 
-        # $<$<CONFIG:Debug>:-fsanitize=address -gdwarf-5>
+        $<$<BOOL:${ASAN}>:-fsanitize=address>
+        $<$<BOOL:${MSAN}>:-fsanitize=memory>
+        $<$<BOOL:${UBSAN}>:-fsanitize=undefined>
+        $<$<BOOL:${TSAN}>:-fsanitize=thread>
         $<$<CONFIG:Debug>:-gdwarf-5>
         $<$<CONFIG:Release>:-march=native>
         $<$<CONFIG:RelWithDebInfo>:-gdwarf-5>
@@ -39,7 +76,10 @@ function(apply_common_settings TARGET)
     )
 
     target_link_options(${TARGET} PRIVATE
-        # $<$<CONFIG:Debug>:-fsanitize=address>
+        $<$<BOOL:${ASAN}>:-fsanitize=address>
+        $<$<BOOL:${MSAN}>:-fsanitize=memory>
+        $<$<BOOL:${UBSAN}>:-fsanitize=undefined>
+        $<$<BOOL:${TSAN}>:-fsanitize=thread>
     )   
 endfunction()
 
@@ -86,6 +126,7 @@ file(GLOB_RECURSE sources
 add_executable(poker ${sources})
 apply_common_settings(poker)
 
+# experiments folder
 file(GLOB_RECURSE exp_sources
     exp/*.c
 	exp/*.cpp 
@@ -94,9 +135,6 @@ file(GLOB_RECURSE exp_sources
 )
 
 if(exp_sources)
-    add_executable(test ${exp_sources})
+    add_executable(experiment ${exp_sources})
     apply_common_settings(test)
 endif()
-
-
-
