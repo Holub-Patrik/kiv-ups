@@ -152,6 +152,7 @@ int main(void) {
   local_addr.sin_family = AF_INET;
   local_addr.sin_port = htons(10000);
   local_addr.sin_addr.s_addr = INADDR_ANY;
+  // local_addr.sin_addr.s_addr = inet_addr("147.228.67.10");
 
   // nastavime parametr SO_REUSEADDR - "znovupouzije" puvodni socket, co jeste
   // muze hnit v systemu bez predchoziho close
