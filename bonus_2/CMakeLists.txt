@@ -29,6 +29,7 @@ function(apply_common_settings TARGET)
     )
 
     target_link_libraries(${TARGET} PRIVATE
+        m
     )
 
     target_link_options(${TARGET} PRIVATE

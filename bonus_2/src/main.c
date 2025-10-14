@@ -17,11 +17,9 @@
 #define OK_LEN 3
 #define WRONG_LEN 6
 
-// telo vlakna co obsluhuje prichozi spojeni
 void *serve_request(void *arg) {
   int client_sock;
   char msg_buf[MSG_BUF];
-  const char num_prefix[NUM_PREFIX_LEN] = {'N', 'U', 'M', ':'};
   const char ok_str[OK_LEN] = {'O', 'K', '\n'};
   const char wrong_str[WRONG_LEN] = {'W', 'R', 'O', 'N', 'G', '\n'};
   char *msg_to_client;
@@ -35,8 +33,6 @@ void *serve_request(void *arg) {
 
   memset(msg_buf, 0, MSG_BUF);
 
-  // pretypujem parametr z netypoveho ukazate na ukazatel na int a dereferujeme
-  // --> to nam vrati puvodni socket
   client_sock = *(int *)arg;
 
   i = 0;
@@ -60,8 +56,6 @@ void *serve_request(void *arg) {
     return (void *)1;
   }
 
-  puts("sending random value");
-
   random_value = random() % RANDOM_RANGE;
   if (random_value == 0) {
     random_value_length = 1;
@@ -80,8 +74,6 @@ void *serve_request(void *arg) {
 
   snprintf(msg_to_client, msg_to_client_len + 1, "NUM:%ld\n", random_value);
   send(client_sock, msg_to_client, msg_to_client_len * sizeof(char), 0);
-
-  puts("sent random value");
 
   i = 0;
   while (i < MSG_BUF) {
@@ -102,15 +94,10 @@ void *serve_request(void *arg) {
     i++;
   }
 
-  if (memcmp(msg_buf, num_prefix, NUM_PREFIX_LEN)) {
-    send(client_sock, &wrong_str, sizeof(char) * WRONG_LEN, 0);
+  printf("Sent: %ld", random_value);
+  printf("Got: %s", msg_buf);
 
-    free(msg_to_client);
-    free(arg);
-    return (void *)0;
-  }
-
-  double_value = strtol(&msg_buf[NUM_PREFIX_LEN], NULL, 10);
+  double_value = strtol(msg_buf, NULL, 10);
 
   if (double_value == random_value * 2) {
     send(client_sock, &ok_str, sizeof(char) * OK_LEN, 0);
@@ -152,7 +139,6 @@ int main(void) {
   local_addr.sin_family = AF_INET;
   local_addr.sin_port = htons(10000);
   local_addr.sin_addr.s_addr = INADDR_ANY;
-  // local_addr.sin_addr.s_addr = inet_addr("147.228.67.10");
 
   // nastavime parametr SO_REUSEADDR - "znovupouzije" puvodni socket, co jeste
   // muze hnit v systemu bez predchoziho close
