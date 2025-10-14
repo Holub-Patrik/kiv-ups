@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	SERVER_HOST = "localhost"
-	SERVER_PORT = "10000"
+	SERVER_HOST = "147.228.67.113"
+	SERVER_PORT = "4242"
 	SERVER_TYPE = "tcp"
 )
 
@@ -19,13 +19,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	_, err = connection.Write([]byte("Hello Server! Greetings."))
-	buffer := make([]byte, 1024)
-	mLen, err := connection.Read(buffer)
-	if err != nil {
-		fmt.Println("Error reading:", err.Error())
-	} else {
-		fmt.Println("Received: ", string(buffer[:mLen]))
-	}
+	connection.Write([]byte("KIVUPSnick001412Holub Patrik"))
+	// connection.Write([]byte("KIVUPSchat00090061234560"))
+	connection.Write([]byte("KIVUPSdisc001412HolubPatrik"))
+
 	connection.Close()
 }
