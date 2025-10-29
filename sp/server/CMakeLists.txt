@@ -14,7 +14,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 function(apply_common_settings TARGET)
-    target_compile_features(${TARGET} PRIVATE cxx_std_23)
+    target_compile_features(${TARGET} PRIVATE cxx_std_20)
 
     target_compile_options(${TARGET} PRIVATE 
         $<$<BOOL:${ASAN}>:-fsanitize=address>
