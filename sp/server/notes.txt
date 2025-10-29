@@ -1,0 +1,9 @@
+Current Thread hierarchy
+- main server thread
+-- spawns room process
+- room thread
+-- client thread
+--- msg thread
+-- client thread
+--- msg thread
+
