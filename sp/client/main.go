@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,8 +14,8 @@ import (
 
 // Message types from server
 const (
-	MsgTypeServerMessage = 0x01
-	MsgTypeGameState     = 0x02
+	MsgTypeServerMessage byte = 'S'
+	MsgTypeGameState     byte = 'G'
 )
 
 // Connection states
@@ -151,6 +151,7 @@ func (nc *NetworkClient) handleConnection() {
 	for {
 		select {
 		case <-nc.shutdownChan:
+			fmt.Println("NC Shutdownn")
 			return
 		default:
 		}
@@ -170,6 +171,7 @@ func (nc *NetworkClient) handleConnection() {
 		}
 
 		if n < 5 { // Minimum message: type(1) + length(4)
+			fmt.Println("Msg too short, continuing")
 			continue
 		}
 
@@ -179,10 +181,17 @@ func (nc *NetworkClient) handleConnection() {
 
 func (nc *NetworkClient) processMessage(data []byte) {
 	msgType := data[0]
-	msgLen := binary.LittleEndian.Uint32(data[1:5])
+	msgLenStr := string(data[1:5])
+	msgLen, err := strconv.ParseUint(msgLenStr, 10, 64)
+
+	if err != nil {
+		fmt.Printf("Couldn't convert string to int: %s\n", msgLenStr)
+		return
+	}
 
 	if len(data) < int(5+msgLen) {
-		return // Incomplete message
+		fmt.Printf("Message wasn't long enough: dataLen: %d | msgLen: %d\n", len(data), msgLen)
+		return
 	}
 
 	payload := data[5 : 5+msgLen]
@@ -268,6 +277,7 @@ func main() {
 		if rl.CheckCollisionPointRec(mousePos, button1Rect) {
 			btn1Color = rl.Gray
 		}
+
 		rl.DrawRectangleRec(button1Rect, btn1Color)
 		rl.DrawRectangleLinesEx(button1Rect, 2, rl.DarkGray)
 		rl.DrawText("RECONNECT", 70, 65, 20, rl.Black)
