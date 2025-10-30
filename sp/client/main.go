@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	// "io"
 	"net"
 	"strconv"
 	"sync"
@@ -147,6 +148,9 @@ func (nc *NetworkClient) connectionManager(addr string) {
 
 func (nc *NetworkClient) handleConnection() {
 	buf := make([]byte, 4096)
+	wrote_hello := false
+
+	no_response_attempts := 0
 
 	for {
 		select {
@@ -156,18 +160,26 @@ func (nc *NetworkClient) handleConnection() {
 		default:
 		}
 
+		if !wrote_hello {
+			fmt.Println("Wrote hello to server")
+			nc.conn.Write([]byte("Hello From Client"))
+			wrote_hello = true
+		}
+
 		// Set read deadline to allow periodic shutdown checks
 		nc.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 
 		n, err := nc.conn.Read(buf)
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue
-			}
-			if err != io.EOF {
-				nc.connState.SetError(fmt.Sprintf("Read error: %v", err))
-			}
+		if err != nil && err != io.EOF {
+			nc.connState.SetError(fmt.Sprintf("Read error: %v", err))
 			return
+		}
+
+		if err == io.EOF {
+			no_response_attempts += 1
+			if no_response_attempts > 200 {
+				return
+			}
 		}
 
 		if n < 5 { // Minimum message: type(1) + length(4)

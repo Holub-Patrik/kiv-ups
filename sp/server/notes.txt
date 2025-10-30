@@ -7,3 +7,30 @@ Current Thread hierarchy
 -- client thread
 --- msg thread
 
+Player State
+- Taken Action
+- Tokens
+
+Game State Machine
+Round State Machine
+
+PN | (Raise? Pass? Skip?)
+Raise = Msg From Client
+Skip = Connection issues / Disconnect Msg
+Pass = Msg From Client / Result from Skip
+Fold = Msg From Client / Result from Skip
+
+(Pass Round)
+In case skip is executed
+- If connection issues are cause -> Execute pass
+- If disconnect is the cause -> Execute fold
+
+(Betting Round)
+In case skip is executed -> Execute fold
+
+P1 -> P2 -> P3 -> P4
+
+Within a round
+- If a bet is placed, that round is now Betting round
+- Betting round forces additional check at the end if everyone has placed a bet
+
