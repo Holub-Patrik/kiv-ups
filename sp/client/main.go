@@ -148,9 +148,10 @@ func (nc *NetworkClient) connectionManager(addr string) {
 
 func (nc *NetworkClient) handleConnection() {
 	buf := make([]byte, 4096)
-	wrote_hello := false
+	wroteHello := false
+	currectIndex := 0
 
-	no_response_attempts := 0
+	// no_response_attempts := 0
 
 	for {
 		select {
@@ -160,30 +161,31 @@ func (nc *NetworkClient) handleConnection() {
 		default:
 		}
 
-		if !wrote_hello {
+		if !wroteHello {
 			fmt.Println("Wrote hello to server")
 			nc.conn.Write([]byte("Hello From Client"))
-			wrote_hello = true
+			wroteHello = true
 		}
 
 		// Set read deadline to allow periodic shutdown checks
 		nc.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 
-		n, err := nc.conn.Read(buf)
+		n, err := nc.conn.Read(buf[currectIndex:])
 		if err != nil && err != io.EOF {
 			nc.connState.SetError(fmt.Sprintf("Read error: %v", err))
 			return
 		}
+		currectIndex += n
 
-		if err == io.EOF {
+		/* if err == io.EOF {
 			no_response_attempts += 1
 			if no_response_attempts > 200 {
 				return
 			}
-		}
+		} */
 
 		if n < 5 { // Minimum message: type(1) + length(4)
-			fmt.Println("Msg too short, continuing")
+			// fmt.Println("Msg too short, continuing")
 			continue
 		}
 
