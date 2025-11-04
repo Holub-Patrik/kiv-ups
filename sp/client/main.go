@@ -163,7 +163,7 @@ func (nc *NetworkClient) handleConnection() {
 
 		if !wroteHello {
 			fmt.Println("Wrote hello to server")
-			nc.conn.Write([]byte("Hello From Client"))
+			nc.conn.Write([]byte("PKRPGSTR0017Hello From Client\n"))
 			wroteHello = true
 		}
 
