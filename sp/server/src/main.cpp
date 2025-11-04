@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <format>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -24,7 +23,7 @@ extern "C" {
 
 constexpr long max_port = 65535;
 constexpr int player_count = 4;
-constexpr std::size_t TIMEOUT_DISCONNECT = 50000;
+constexpr std::size_t TIMEOUT_DISCONNECT = 5000;
 
 enum class SocketExceptionType { SOCK, SETSOCKOPT, BIND, LISTEN, ACCEPT };
 
@@ -301,6 +300,11 @@ struct usr_args {
   explicit usr_args(std::uint16_t p) : port(p) {}
 };
 
+struct MsgStruct {
+  std::string code;
+  std::optional<std::string> payload = std::nullopt;
+};
+
 template <typename Type, std::size_t Size>
 auto accepter_thread(CB::Writer<Type, Size>& out, const RemoteSock& player,
                      std::atomic<bool>& stop) -> void {
@@ -320,35 +324,31 @@ auto accepter_thread(CB::Writer<Type, Size>& out, const RemoteSock& player,
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       continue;
     }
-
-    const std::vector<char> bytes{buf.begin(), buf.begin() + bytes_read};
+    std::cout << "Recieved: " << bytes_read << std::endl;
 
     usize total_parsed_bytes = 0;
     Net::Serde::ParseResults results{};
+
     while (true) {
       const auto& start = buf.begin() + total_parsed_bytes;
       const auto& end = buf.begin() + bytes_read;
-      results = parser.parse_bytes(std::vector<char>{start, end});
 
-      std::cout << "Bytes parsed: " << results.bytes_parsed << std::endl;
-      std::cout << "Payload reached: " << results.payload_reached << std::endl;
-      std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+      results = parser.parse_bytes(std::string_view{start, end});
 
       if (results.error_occured) {
-        std::cout << "Error occured during message parsing" << std::endl;
+        // set stop to true
         stop = true;
         return;
       }
 
-      if (results.payload_reached) {
-        out.wait_and_insert(results.payload);
+      if (results.parser_done) {
+        out.wait_and_insert(MsgStruct{results.code, results.payload});
+        parser.reset_parser();
       }
 
       total_parsed_bytes += results.bytes_parsed;
 
       if (total_parsed_bytes >= bytes_read) {
-        std::cout << std::format("Parsed message ({})", bytes_read)
-                  << std::endl;
         break;
       }
     }
@@ -361,7 +361,7 @@ auto player_thread(const ServerSocket& server_sock,
                    std::vector<std::string>& mem, std::mutex& mem_mutex)
     -> void {
   RemoteSock player{server_sock};
-  CB::Buffer<std::string, 128> msg_buf;
+  CB::Buffer<MsgStruct, 128> msg_buf;
   CB::Reader in{msg_buf};
   CB::Writer acceptor_writer{msg_buf};
 
@@ -387,7 +387,10 @@ auto player_thread(const ServerSocket& server_sock,
 
     if (ret) {
       const auto& client_msg = ret.value();
-      std::cout << "From client: " << client_msg << std::endl;
+      std::cout << "From client: " << client_msg.code << std::endl;
+      if (client_msg.payload) {
+        std::cout << "- Payload: " << client_msg.payload.value() << std::endl;
+      }
       no_answers = false;
     } else {
       if (!no_answers) {

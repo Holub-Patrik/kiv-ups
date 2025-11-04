@@ -6,9 +6,10 @@
 #include <vector>
 
 constexpr std::size_t MSG_CODE_SIZE = 4;
-constexpr std::size_t PAYLOAD_LEN_SIZE = 5;
+constexpr std::size_t PAYLOAD_LEN_SIZE = 4;
 constexpr std::size_t SIZESTR_LEN = 4;
 
+namespace {
 using str = std::string;
 using str_v = std::string_view;
 using usize = std::size_t;
@@ -18,6 +19,8 @@ template <typename T> using vec = std::vector<T>;
 template <typename T, usize S> using arr = std::array<T, S>;
 
 constexpr std::nullopt_t null = std::nullopt;
+
+} // namespace
 
 static opt<usize> read_size(const str& payload, const usize begin_index = 0) {
   if ((payload.size() - begin_index) < SIZESTR_LEN) {
@@ -80,23 +83,39 @@ struct GeneralString {
 
 namespace Serde {
 
-enum class MainPart { Magic_1, Magic_2, Magic_3, Size, Code, Payload };
+enum class MainPart {
+  Magic_1,
+  Magic_2,
+  Magic_3,
+  Type,
+  Code,
+  Size,
+  Payload,
+  Endline
+};
 
 enum class ParserState { OK, Done, Invalid };
 
+enum class MsgType {
+  Payload = 'P',
+  NoPayload = 'N',
+};
+
 struct ParseResults {
-  bool payload_reached;
-  bool error_occured;
-  usize bytes_parsed;
+  bool error_occured = false;
+  bool parser_done = false;
   str code;
-  str payload;
+  usize bytes_parsed = 0;
+  MsgType type;
+  opt<str> payload = null;
 };
 
 class MainParser final {
 private:
   vec<char> payload{};
-  vec<char> code{MSG_CODE_SIZE};
+  str code{};
   MainPart phase = MainPart::Magic_1;
+  MsgType type;
   usize size_index = 0;
   usize code_index = 0;
   usize payload_len = 0;
@@ -134,7 +153,31 @@ public:
         std::cout << "Invalid Magic" << std::endl;
         return ParserState::Invalid;
       }
-      phase = MainPart::Size;
+      phase = MainPart::Type;
+      break;
+
+    case MainPart::Type:
+      if (byte != 'N' && byte != 'P') {
+        std::cout << "Unknown Msg Type" << std::endl;
+        return ParserState::Invalid;
+      }
+
+      type = static_cast<MsgType>(byte);
+      phase = MainPart::Code;
+      break;
+
+    case MainPart::Code:
+      code.push_back(byte);
+      code_index++;
+
+      if (code_index >= MSG_CODE_SIZE) {
+        if (type == MsgType::NoPayload) {
+          // skip to end if No Payload message is sent
+          phase = MainPart::Endline;
+        } else {
+          phase = MainPart::Size;
+        }
+      }
       break;
 
     case MainPart::Size:
@@ -148,20 +191,6 @@ public:
       size_index++;
 
       if (size_index >= PAYLOAD_LEN_SIZE) {
-        payload_len -= MSG_CODE_SIZE;
-        phase = MainPart::Code;
-      }
-      break;
-
-    case MainPart::Code:
-      code.push_back(byte);
-      code_index++;
-
-      if (code_index >= MSG_CODE_SIZE) {
-        if (payload_len <= 0) {
-          return ParserState::Done;
-        }
-
         phase = MainPart::Payload;
       }
       break;
@@ -170,9 +199,17 @@ public:
       payload.push_back(byte);
 
       if (payload.size() == payload_len) {
-        return ParserState::Done;
+        phase = MainPart::Endline;
       }
 
+      break;
+
+    case MainPart::Endline:
+      if (byte == '\n') {
+        return ParserState::Done;
+      } else {
+        return ParserState::Invalid;
+      }
       break;
     }
 
@@ -189,30 +226,81 @@ public:
   struct ParseResults parse_bytes(const vec<char> bytes) {
     struct ParseResults res{};
     usize i = 0;
-    while (i < bytes.size()) {
+
+    while (true) {
+      if (i >= bytes.size()) {
+        break;
+      }
+
+      if (res.parser_done == true || res.error_occured == true) {
+        break;
+      }
+
       const ParserState state = parse_byte(bytes[i]);
       i++;
 
       switch (state) {
       case ParserState::OK:
-        continue;
+        break;
       case ParserState::Done:
-        res.payload = get_payload();
-        res.bytes_parsed = i;
-        res.payload_reached = true;
-        res.error_occured = false;
-        return res;
+        res.parser_done = true;
+        break;
       case ParserState::Invalid:
         res.error_occured = true;
-        res.bytes_parsed = i;
-        return res;
+        break;
       }
     }
 
-    res.error_occured = false;
-    res.bytes_parsed = i;
-    res.payload_reached = false;
+    if (res.parser_done) {
+      res.type = type;
+      res.code = code;
+      if (type == MsgType::Payload) {
+        res.payload = get_payload();
+      }
+    }
 
+    res.bytes_parsed = i;
+    return res;
+  }
+
+  struct ParseResults parse_bytes(const str_v& byte_view) {
+    std::cout << "Parsing start" << std::endl;
+    struct ParseResults res{};
+    usize i = 0;
+
+    while (true) {
+      if (i >= byte_view.size()) {
+        break;
+      }
+
+      if (res.parser_done == true || res.error_occured == true) {
+        break;
+      }
+      const ParserState state = parse_byte(byte_view[i]);
+      i++;
+
+      switch (state) {
+      case ParserState::OK:
+        break;
+      case ParserState::Done:
+        res.parser_done = true;
+        break;
+      case ParserState::Invalid:
+        res.error_occured = true;
+        break;
+      }
+    }
+
+    if (res.parser_done) {
+      res.type = type;
+      res.code = code;
+      if (type == MsgType::Payload) {
+        res.payload = get_payload();
+      }
+    }
+
+    res.bytes_parsed = i;
+    std::cout << "Parsing end" << std::endl;
     return res;
   }
 };
