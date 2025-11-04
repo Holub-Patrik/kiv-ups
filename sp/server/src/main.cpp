@@ -1,5 +1,6 @@
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <exception>
 #include <format>
@@ -17,6 +18,9 @@ extern "C" {
 #include <sys/un.h>
 #include <unistd.h>
 }
+
+#include "CircularBufferQueue.hpp"
+#include "MessageSerde.hpp"
 
 constexpr long max_port = 65535;
 constexpr int player_count = 4;
@@ -189,7 +193,8 @@ public:
 };
 
 auto player_thread(const ServerSocket& server_sock,
-                   std::vector<std::string>& mem, std::mutex& mem_mutex) -> int;
+                   std::vector<std::string>& mem, std::mutex& mem_mutex)
+    -> void;
 
 class Server final {
 private:
@@ -220,33 +225,70 @@ public:
   void run() {
     // manually unrolled the loop
     // with a for loop, it was for some reason causing issues
-    player_threads.at(0) = std::thread([&]() -> int {
-      return player_thread(sock, player_mem.at(0), player_mem_mutex.at(0));
+
+    // for (int i = 0; i < player_count; i++) {
+    //   player_threads.at(i) = std::thread([&]() -> void {
+    //     player_thread(sock, player_mem.at(i), player_mem_mutex.at(i));
+    //   });
+    // }
+
+    player_threads.at(0) = std::thread([&]() -> void {
+      player_thread(sock, player_mem.at(0), player_mem_mutex.at(0));
     });
-    player_threads.at(1) = std::thread([&]() -> int {
-      return player_thread(sock, player_mem.at(1), player_mem_mutex.at(1));
+    player_threads.at(1) = std::thread([&]() -> void {
+      player_thread(sock, player_mem.at(1), player_mem_mutex.at(1));
     });
-    player_threads.at(2) = std::thread([&]() -> int {
-      return player_thread(sock, player_mem.at(2), player_mem_mutex.at(2));
+    player_threads.at(2) = std::thread([&]() -> void {
+      player_thread(sock, player_mem.at(2), player_mem_mutex.at(2));
     });
-    player_threads.at(3) = std::thread([&]() -> int {
-      return player_thread(sock, player_mem.at(3), player_mem_mutex.at(3));
+    player_threads.at(3) = std::thread([&]() -> void {
+      player_thread(sock, player_mem.at(3), player_mem_mutex.at(3));
     });
 
     bool joined = false;
+    std::array<bool, player_count> join_arr{false, false, false, false};
     while (true) {
-      for (auto& t : player_threads) {
-        if (t.joinable()) {
-          t.join();
+      if (!join_arr[0]) {
+        if (player_threads.at(0).joinable()) {
+          player_threads.at(0).join();
+          join_arr[0] = true;
           joined = true;
         }
-
-        if (!joined) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-
-        joined = false;
       }
+
+      if (!join_arr[1]) {
+        if (player_threads.at(1).joinable()) {
+          player_threads.at(1).join();
+          join_arr[1] = true;
+          joined = true;
+        }
+      }
+
+      if (!join_arr[2]) {
+        if (player_threads.at(2).joinable()) {
+          player_threads.at(2).join();
+          join_arr[2] = true;
+          joined = true;
+        }
+      }
+
+      if (!join_arr[3]) {
+        if (player_threads.at(3).joinable()) {
+          player_threads.at(3).join();
+          join_arr[3] = true;
+          joined = true;
+        }
+      }
+
+      if (join_arr[0] && join_arr[1] && join_arr[2] && join_arr[3]) {
+        break;
+      }
+
+      if (!joined) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      }
+
+      joined = false;
     }
 
     return;
@@ -258,22 +300,104 @@ struct usr_args {
   explicit usr_args(std::uint16_t p) : port(p) {}
 };
 
+template <typename Type, std::size_t Size>
+auto accepter_thread(CB::Writer<Type, Size>& out, const RemoteSock& player,
+                     bool* stop) -> void {
+  std::array<char, 256> buf{0};
+  Net::Serde::MainParser parser{};
+
+  while (true) {
+    if (stop) {
+      break;
+    }
+    const auto bytes_read =
+        recv(player.get_fd(), buf.data(), buf.size(), MSG_DONTWAIT);
+    if (bytes_read <= 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      continue;
+    }
+
+    const std::vector<char> bytes{buf.begin(), buf.begin() + bytes_read};
+    usize total_parsed_bytes = 0;
+    auto results = parser.parse_bytes(bytes);
+    while (true) {
+      if (results.error_occured) {
+        *stop = true;
+        return;
+      }
+
+      if (results.payload_reached) {
+        out.wait_and_insert(results.payload);
+      }
+
+      total_parsed_bytes += results.bytes_parsed;
+
+      if (total_parsed_bytes == bytes_read) {
+        break;
+      }
+    }
+  }
+}
+
 auto player_thread(const ServerSocket& server_sock,
                    std::vector<std::string>& mem, std::mutex& mem_mutex)
-    -> int {
+    -> void {
   RemoteSock player{server_sock};
-  std::cout << "Accepted connection from player" << std::endl;
-  std::array<char, 256> buf;
-  memset(buf.data(), 0, buf.size());
+  CB::Buffer<std::string, 128> msg_buf;
+  CB::Reader in{msg_buf};
+  CB::Writer acceptor_writer{msg_buf};
 
-  const auto bytes_read = recv(player.get_fd(), buf.data(), buf.size(), 0);
-  std::cout << std::format("Thread: Read {} bytes: {}", bytes_read, buf.data())
-            << std::endl;
+  bool stop = false;
+  std::thread t_acceptor(
+      [&]() -> void { accepter_thread(acceptor_writer, player, &stop); });
+
+  std::cout << "Accepted connection from player" << std::endl;
   std::string msg_to_client{"S0015HelloFromServer"};
   const auto bytes_sent =
       send(player.get_fd(), msg_to_client.data(), msg_to_client.size(), 0);
 
-  return 0;
+  int no_answers = false;
+  std::chrono::time_point na_start = std::chrono::high_resolution_clock::now();
+  while (true) {
+    const auto& ret = in.read();
+
+    // stop flag has been set externally
+    if (stop) {
+      std::cout << "Client sent incorrect message" << std::endl;
+      break;
+    }
+
+    if (ret) {
+
+      const auto& client_msg = ret.value();
+      std::cout << std::format("Thread: Read {} bytes: {}", client_msg,
+                               client_msg.size())
+                << std::endl;
+      no_answers = false;
+    } else {
+      if (!no_answers) {
+        no_answers = true;
+        na_start = std::chrono::high_resolution_clock::now();
+      } else {
+        const auto this_time = std::chrono::high_resolution_clock::now();
+        const auto na_dur =
+            std::chrono::duration_cast<std::chrono::milliseconds>(this_time -
+                                                                  na_start)
+                .count();
+        if (na_dur > 5000) {
+          std::cout << "Trying to disconnect player" << std::endl;
+          break;
+        }
+      }
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      continue;
+    }
+  }
+
+  stop = true;
+  t_acceptor.join();
+  std::cout << "Joined relevant player thread" << std::endl;
 }
 
 auto parse_args(std::vector<std::string> args) -> std::optional<usr_args> {

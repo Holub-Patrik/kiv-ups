@@ -34,3 +34,11 @@ Within a round
 - If a bet is placed, that round is now Betting round
 - Betting round forces additional check at the end if everyone has placed a bet
 
+Maybe I just use a map
+unordered_map<string, function>
+function(const string& payload) -> std::variant<all options>
+Since I have the entire payload, I can use very easy substring operations to convert messsages to data
+
+Game Play
+1. Connect to a server
+2. List Rooms

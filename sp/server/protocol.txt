@@ -3,7 +3,9 @@ MAGICK := PKR
 
 // Total message length can be up to 9_999
 // That should be more than enough
-MSG_SIZE := INT(4)
+MSG_SIZE := INT(5)
+
+
 
 MSG_TYPES := BYTE(1) {
 	A // Player Action -> Fold, Bet, Check, Even
