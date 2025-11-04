@@ -24,6 +24,7 @@ extern "C" {
 
 constexpr long max_port = 65535;
 constexpr int player_count = 4;
+constexpr std::size_t TIMEOUT_DISCONNECT = 50000;
 
 enum class SocketExceptionType { SOCK, SETSOCKOPT, BIND, LISTEN, ACCEPT };
 
@@ -302,14 +303,17 @@ struct usr_args {
 
 template <typename Type, std::size_t Size>
 auto accepter_thread(CB::Writer<Type, Size>& out, const RemoteSock& player,
-                     bool* stop) -> void {
+                     std::atomic<bool>& stop) -> void {
   std::array<char, 256> buf{0};
   Net::Serde::MainParser parser{};
+
+  std::cout << "Accepter thread started" << std::endl;
 
   while (true) {
     if (stop) {
       break;
     }
+
     const auto bytes_read =
         recv(player.get_fd(), buf.data(), buf.size(), MSG_DONTWAIT);
     if (bytes_read <= 0) {
@@ -318,11 +322,21 @@ auto accepter_thread(CB::Writer<Type, Size>& out, const RemoteSock& player,
     }
 
     const std::vector<char> bytes{buf.begin(), buf.begin() + bytes_read};
+
     usize total_parsed_bytes = 0;
-    auto results = parser.parse_bytes(bytes);
+    Net::Serde::ParseResults results{};
     while (true) {
+      const auto& start = buf.begin() + total_parsed_bytes;
+      const auto& end = buf.begin() + bytes_read;
+      results = parser.parse_bytes(std::vector<char>{start, end});
+
+      std::cout << "Bytes parsed: " << results.bytes_parsed << std::endl;
+      std::cout << "Payload reached: " << results.payload_reached << std::endl;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+
       if (results.error_occured) {
-        *stop = true;
+        std::cout << "Error occured during message parsing" << std::endl;
+        stop = true;
         return;
       }
 
@@ -332,11 +346,15 @@ auto accepter_thread(CB::Writer<Type, Size>& out, const RemoteSock& player,
 
       total_parsed_bytes += results.bytes_parsed;
 
-      if (total_parsed_bytes == bytes_read) {
+      if (total_parsed_bytes >= bytes_read) {
+        std::cout << std::format("Parsed message ({})", bytes_read)
+                  << std::endl;
         break;
       }
     }
   }
+
+  std::cout << "Accepter thread ending" << std::endl;
 }
 
 auto player_thread(const ServerSocket& server_sock,
@@ -347,12 +365,12 @@ auto player_thread(const ServerSocket& server_sock,
   CB::Reader in{msg_buf};
   CB::Writer acceptor_writer{msg_buf};
 
-  bool stop = false;
+  std::atomic<bool> stop = false;
   std::thread t_acceptor(
-      [&]() -> void { accepter_thread(acceptor_writer, player, &stop); });
+      [&]() -> void { accepter_thread(acceptor_writer, player, stop); });
 
   std::cout << "Accepted connection from player" << std::endl;
-  std::string msg_to_client{"S0015HelloFromServer"};
+  std::string msg_to_client{"S0016HelloFromServer\n"};
   const auto bytes_sent =
       send(player.get_fd(), msg_to_client.data(), msg_to_client.size(), 0);
 
@@ -368,11 +386,8 @@ auto player_thread(const ServerSocket& server_sock,
     }
 
     if (ret) {
-
       const auto& client_msg = ret.value();
-      std::cout << std::format("Thread: Read {} bytes: {}", client_msg,
-                               client_msg.size())
-                << std::endl;
+      std::cout << "From client: " << client_msg << std::endl;
       no_answers = false;
     } else {
       if (!no_answers) {
@@ -384,7 +399,7 @@ auto player_thread(const ServerSocket& server_sock,
             std::chrono::duration_cast<std::chrono::milliseconds>(this_time -
                                                                   na_start)
                 .count();
-        if (na_dur > 5000) {
+        if (na_dur > TIMEOUT_DISCONNECT) {
           std::cout << "Trying to disconnect player" << std::endl;
           break;
         }

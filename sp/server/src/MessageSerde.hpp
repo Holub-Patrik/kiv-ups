@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -114,57 +115,68 @@ public:
     switch (phase) {
     case MainPart::Magic_1:
       if (byte != 'P') {
+        std::cout << "Invalid Magic" << std::endl;
         return ParserState::Invalid;
-      } else {
-        phase = MainPart::Magic_2;
-        return ParserState::OK;
       }
+      phase = MainPart::Magic_2;
+      break;
 
     case MainPart::Magic_2:
       if (byte != 'K') {
+        std::cout << "Invalid Magic" << std::endl;
         return ParserState::Invalid;
-      } else {
-        phase = MainPart::Magic_3;
-        return ParserState::OK;
       }
+      phase = MainPart::Magic_3;
+      break;
 
     case MainPart::Magic_3:
       if (byte != 'R') {
+        std::cout << "Invalid Magic" << std::endl;
         return ParserState::Invalid;
-      } else {
-        phase = MainPart::Size;
-        return ParserState::OK;
       }
+      phase = MainPart::Size;
+      break;
 
     case MainPart::Size:
       if (byte < '0' || byte > '9') {
+        std::cout << std::format("Non numeric character in size: {}", byte)
+                  << std::endl;
         return ParserState::Invalid;
-      } else {
-        payload_len = payload_len * 10 + static_cast<usize>(byte - '0');
       }
+
+      payload_len = payload_len * 10 + static_cast<usize>(byte - '0');
       size_index++;
-      if (size_index > 4) {
+
+      if (size_index >= PAYLOAD_LEN_SIZE) {
         payload_len -= MSG_CODE_SIZE;
         phase = MainPart::Code;
       }
-      return ParserState::OK;
+      break;
 
     case MainPart::Code:
-      if (code_index == MSG_CODE_SIZE) {
-        phase = MainPart::Payload;
-      }
-
       code.push_back(byte);
       code_index++;
 
+      if (code_index >= MSG_CODE_SIZE) {
+        if (payload_len <= 0) {
+          return ParserState::Done;
+        }
+
+        phase = MainPart::Payload;
+      }
+      break;
+
     case MainPart::Payload:
+      payload.push_back(byte);
+
       if (payload.size() == payload_len) {
         return ParserState::Done;
       }
 
-      payload.push_back(byte);
-      return ParserState::OK;
+      break;
     }
+
+    return ParserState::OK;
   }
 
   str get_payload() const noexcept {
@@ -176,9 +188,11 @@ public:
   // otherwise it returns nullopt and
   struct ParseResults parse_bytes(const vec<char> bytes) {
     struct ParseResults res{};
-
-    for (usize i = 0; i < bytes.size(); i++) {
+    usize i = 0;
+    while (i < bytes.size()) {
       const ParserState state = parse_byte(bytes[i]);
+      i++;
+
       switch (state) {
       case ParserState::OK:
         continue;
@@ -196,7 +210,7 @@ public:
     }
 
     res.error_occured = false;
-    res.bytes_parsed = bytes.size();
+    res.bytes_parsed = i;
     res.payload_reached = false;
 
     return res;
