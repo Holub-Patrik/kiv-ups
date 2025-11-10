@@ -1,88 +1,168 @@
 package main
 
-import rl "github.com/gen2brain/raylib-go/raylib"
+import (
+	rl "github.com/gen2brain/raylib-go/raylib"
+)
 
 const (
-	margin          float32 = 10
-	main_menu_width float32 = 0.6
-	button_height   float32 = 50
-	button_width    float32 = 100
+	margin                float32 = 10
+	hor_menu_width_ratio  float32 = 0.7
+	hor_menu_height_ratio float32 = 0.6
+	ver_menu_width_ratio  float32 = 0.5
+	ver_menu_height_ratio float32 = 0.8
+	button_height_ratio   float32 = 0.05
+	button_width_ratio    float32 = 0.07
 )
 
 type Number interface {
 	int | uint32 | uint64 | int32 | int64 | float32 | float64
 }
 
-func getMainMenuRect[num Number](width num, height num) rl.Rectangle {
+func getHorizontalMenuRect[num Number](x num, y num, width num, height num) rl.Rectangle {
 	// basically just use this so that the caller doesn't have to call float32() themself
 	width_f32 := float32(width)
 	height_f32 := float32(height)
+	x_f32 := float32(x)
+	y_f32 := float32(y)
 
-	inner_width := main_menu_width * width_f32
-	inner_height := height_f32 - (margin * 2)
+	inner_width := (width_f32 - (margin * 2)) * hor_menu_width_ratio
+	inner_height := (height_f32 - (margin * 2)) * hor_menu_height_ratio
+
+	center_x := x_f32 + width_f32/2 - inner_width/2
+	center_y := y_f32 + height_f32/2 - inner_height/2
 
 	return rl.Rectangle{
-		X:      margin,
-		Y:      margin,
+		X:      center_x,
+		Y:      center_y,
 		Width:  inner_width,
 		Height: inner_height,
 	}
 }
 
-func getMainMenuButtons(main_menu_rect rl.Rectangle, count int) []rl.Rectangle {
+func getVerticalMenuRect[num Number](x num, y num, width num, height num) rl.Rectangle {
+	// basically just use this so that the caller doesn't have to call float32() themself
+	width_f32 := float32(width)
+	height_f32 := float32(height)
+	x_f32 := float32(x)
+	y_f32 := float32(y)
+
+	inner_width := (width_f32 - (margin * 2)) * ver_menu_width_ratio
+	inner_height := (height_f32 - (margin * 2)) * ver_menu_height_ratio
+
+	center_x := x_f32 + width_f32/2 - inner_width/2
+	center_y := y_f32 + height_f32/2 - inner_height/2
+
+	return rl.Rectangle{
+		X:      center_x,
+		Y:      center_y,
+		Width:  inner_width,
+		Height: inner_height,
+	}
+}
+
+func getMenuButtonsVertical(menu rl.Rectangle, count int) []rl.Rectangle {
+	btn_h := float32(rl.GetScreenHeight()) * button_height_ratio
+	btn_w := float32(rl.GetScreenWidth()) * button_width_ratio
+
 	buttons := make([]rl.Rectangle, count)
 
-	button_cont_height := (main_menu_rect.Height / float32(len(buttons))) - (margin * 2)
-	button_cont_width := (main_menu_rect.Width) - (margin * 2)
+	btn_cont_h := (menu.Height / float32(len(buttons))) - (margin * 2)
+	btn_cont_w := (menu.Width) - (margin * 2)
 
-	var final_button_height = button_height
-	var final_button_width = button_width
+	var final_btn_h = btn_h
+	var final_btn_w = btn_w
 
-	var (
-		scaled_height bool = false
-		scaled_width  bool = false
-	)
+	var scaled_width bool = false
 
 	// technically possible that the window goes bellow the size where 50 x 100 is possible,
 	// then move onto centered scaled button
-	if button_cont_height < button_height {
-		final_button_height = button_cont_height
-		scaled_height = true
+	if btn_cont_h < btn_h {
+		final_btn_h = btn_cont_h
 	}
 
-	if button_cont_width < button_width {
-		final_button_width = button_cont_width
+	if btn_cont_w < btn_w {
+		final_btn_w = btn_cont_w
 		scaled_width = true
 	}
 
-	base_top_left_x := main_menu_rect.X
-	base_top_left_y := main_menu_rect.Y
+	base_top_left_x := menu.X + margin
+	base_top_left_y := menu.Y + margin
 
 	for i := range len(buttons) {
 		i_f32 := float32(i)
-		top_left_x := base_top_left_x + button_cont_height*i_f32
+		top_left_y := base_top_left_y + ((btn_cont_h + (margin * 2)) * i_f32)
+
+		// here I need to center the button
+		middle_x := base_top_left_x + btn_cont_w/2
+		// shifted since I need the left top corner to be slightly offset
+		shifted_middle_x := middle_x - final_btn_w/2
+		buttons[i].X = shifted_middle_x
+
+		if scaled_width {
+			buttons[i].Y = margin
+		} else {
+			middle_y := top_left_y + btn_cont_h/2
+			shifted_middle_y := middle_y - final_btn_h/2
+
+			buttons[i].Y = shifted_middle_y
+		}
+
+		buttons[i].Width = final_btn_w
+		buttons[i].Height = final_btn_h
+	}
+
+	return buttons
+}
+
+func getMenuButtonsHorizontal(menu rl.Rectangle, count int) []rl.Rectangle {
+	btn_h := float32(rl.GetScreenHeight()) * button_height_ratio
+	btn_w := float32(rl.GetScreenWidth()) * button_width_ratio
+
+	buttons := make([]rl.Rectangle, count)
+
+	btn_cont_h := (menu.Height) - (margin * 2)
+	btn_cont_w := (menu.Width / float32(len(buttons))) - (margin * 2)
+
+	var final_btn_h = btn_h
+	var final_btn_w = btn_w
+
+	var scaled_height bool = false
+
+	// technically possible that the window goes bellow the size where 50 x 100 is possible,
+	// then move onto centered scaled button
+	if btn_cont_h < btn_h {
+		final_btn_h = btn_cont_h
+		scaled_height = true
+	}
+
+	if btn_cont_w < btn_w {
+		final_btn_w = btn_cont_w
+	}
+
+	base_top_left_x := menu.X + margin
+	base_top_left_y := menu.Y + margin
+
+	for i := range len(buttons) {
+		i_f32 := float32(i)
+		top_left_x := base_top_left_x + ((btn_cont_w + (margin * 2)) * i_f32)
 
 		if scaled_height {
 			buttons[i].X = top_left_x
 		} else {
 			// here I need to center the button
-			middle_x := top_left_x + button_cont_height/2
+			middle_x := top_left_x + btn_cont_w/2
 			// shifted since I need the left top corner to be slightly offset
-			shifted_middle_x := middle_x - final_button_height/2
+			shifted_middle_x := middle_x - final_btn_w/2
 
 			buttons[i].X = shifted_middle_x
 		}
 
-		if scaled_width {
-			buttons[i].Y = margin
-		} else {
-			middle_y := base_top_left_y + button_cont_width/2
-			shifted_middle_y := middle_y - final_button_width/2
-			buttons[i].Y = shifted_middle_y
-		}
+		middle_y := base_top_left_y + btn_cont_h/2
+		shifted_middle_y := middle_y - final_btn_h/2
+		buttons[i].Y = shifted_middle_y
 
-		buttons[i].Width = final_button_width
-		buttons[i].Height = final_button_height
+		buttons[i].Width = final_btn_w
+		buttons[i].Height = final_btn_h
 	}
 
 	return buttons
