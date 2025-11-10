@@ -18,12 +18,13 @@ const (
 )
 
 type ProgCtx struct {
-	close     bool
-	state     State
-	ip        string
-	port      string
-	main_menu MainMenuData
-	conn_menu ConnectMenuData
+	window_changed bool
+	close          bool
+	state          State
+	ip             string
+	port           string
+	main_menu      MainMenuData
+	conn_menu      ConnectMenuData
 }
 
 type MainMenuData struct {
@@ -43,26 +44,14 @@ type ConnectMenuData struct {
 func initProgCtx() ProgCtx {
 	ret := ProgCtx{}
 
-	ret.main_menu.cont_rec = rl.Rectangle{
-		X:      100,
-		Y:      100,
-		Width:  400,
-		Height: 600,
-	}
+	screen_width := rl.GetScreenHeight()
+	screen_height := rl.GetScreenHeight()
 
-	ret.main_menu.connect_rec = rl.Rectangle{
-		X:      ret.main_menu.cont_rec.X + 10,
-		Y:      ret.main_menu.cont_rec.Y + 10,
-		Width:  (ret.main_menu.cont_rec.Width - 20),
-		Height: 50,
-	}
+	ret.main_menu.cont_rec = getMainMenuRect(screen_width, screen_height)
 
-	ret.main_menu.close_rec = rl.Rectangle{
-		X:      ret.main_menu.connect_rec.X,
-		Y:      ret.main_menu.connect_rec.Y + ret.main_menu.connect_rec.Height + 10,
-		Width:  ret.main_menu.connect_rec.Width,
-		Height: ret.main_menu.connect_rec.Height,
-	}
+	main_menu_buttons := getMainMenuButtons(ret.main_menu.cont_rec, 2)
+	ret.main_menu.connect_rec = main_menu_buttons[0]
+	ret.main_menu.close_rec = main_menu_buttons[1]
 
 	ret.main_menu.back_col = rl.DarkGray
 
@@ -96,6 +85,10 @@ func initProgCtx() ProgCtx {
 	ret.port = string(make([]byte, 0, 5))
 
 	return ret
+}
+
+func (ctx *ProgCtx) recalculate() {
+	// TODO, when screen size changes, recalculate all the parts
 }
 
 func (ctx *ProgCtx) drawMainMenu() {
@@ -134,12 +127,15 @@ func (ctx *ProgCtx) handleServerMenu() {
 
 	editablePort := false
 	editableIP := false
+
 	isMouseOnIPBox := rl.CheckCollisionPointRec(rl.GetMousePosition(), ctx.conn_menu.ip_input_box)
 	isMouseOnPortBox := rl.CheckCollisionPointRec(rl.GetMousePosition(), ctx.conn_menu.port_input_box)
+
 	if isMouseOnIPBox {
 		editableIP = true
 		editablePort = false
 	}
+
 	if isMouseOnPortBox {
 		editablePort = true
 		editableIP = false
