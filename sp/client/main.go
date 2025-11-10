@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 
+	w "poker-client/window"
+
 	rg "github.com/gen2brain/raylib-go/raygui"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -95,37 +97,37 @@ func (ctx *ProgCtx) calculate() {
 	screen_width := rl.GetScreenWidth()
 	screen_height := rl.GetScreenHeight()
 
-	ctx.main_menu.cont_rec = getVerticalMenuRect(
+	ctx.main_menu.cont_rec = w.GetVerticalMenuRect(
 		0,
 		0,
 		screen_width,
 		screen_height,
 	)
 
-	ctx.server_menu.cont_rec = getHorizontalMenuRect(
+	ctx.server_menu.cont_rec = w.GetHorizontalMenuRect(
 		ctx.main_menu.cont_rec.X,
 		ctx.main_menu.cont_rec.Y,
 		ctx.main_menu.cont_rec.Width,
 		ctx.main_menu.cont_rec.Height,
 	)
 
-	ctx.conn_menu.cont_rec = getHorizontalMenuRect(
+	ctx.conn_menu.cont_rec = w.GetHorizontalMenuRect(
 		ctx.main_menu.cont_rec.X,
 		ctx.main_menu.cont_rec.Y,
 		ctx.main_menu.cont_rec.Width,
 		ctx.main_menu.cont_rec.Height,
 	)
 
-	main_menu_buttons := getMenuButtonsVertical(ctx.main_menu.cont_rec, 2)
+	main_menu_buttons := w.GetMenuButtonsVertical(ctx.main_menu.cont_rec, 2)
 	ctx.main_menu.connect_box = main_menu_buttons[0]
 	ctx.main_menu.close_box = main_menu_buttons[1]
 
-	connect_menu_buttons := getMenuButtonsHorizontal(ctx.server_menu.cont_rec, 3)
+	connect_menu_buttons := w.GetMenuButtonsHorizontal(ctx.server_menu.cont_rec, 3)
 	ctx.server_menu.ip_input_box = connect_menu_buttons[0]
 	ctx.server_menu.port_input_box = connect_menu_buttons[1]
 	ctx.server_menu.confirm_box = connect_menu_buttons[2]
 
-	conn_menu_buttons := getMenuButtonsVertical(ctx.conn_menu.cont_rec, 2)
+	conn_menu_buttons := w.GetMenuButtonsVertical(ctx.conn_menu.cont_rec, 2)
 	ctx.conn_menu.state_box = conn_menu_buttons[0]
 	ctx.conn_menu.cancel_box = conn_menu_buttons[1]
 }

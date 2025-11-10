@@ -232,7 +232,7 @@ public:
         break;
       }
 
-      if (res.parser_done == true || res.error_occured == true) {
+      if (res.parser_done || res.error_occured) {
         break;
       }
 

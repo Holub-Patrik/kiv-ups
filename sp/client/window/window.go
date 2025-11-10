@@ -1,4 +1,4 @@
-package main
+package window
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -18,7 +18,7 @@ type Number interface {
 	int | uint32 | uint64 | int32 | int64 | float32 | float64
 }
 
-func getHorizontalMenuRect[num Number](x num, y num, width num, height num) rl.Rectangle {
+func GetHorizontalMenuRect[num Number](x num, y num, width num, height num) rl.Rectangle {
 	// basically just use this so that the caller doesn't have to call float32() themself
 	width_f32 := float32(width)
 	height_f32 := float32(height)
@@ -39,7 +39,7 @@ func getHorizontalMenuRect[num Number](x num, y num, width num, height num) rl.R
 	}
 }
 
-func getVerticalMenuRect[num Number](x num, y num, width num, height num) rl.Rectangle {
+func GetVerticalMenuRect[num Number](x num, y num, width num, height num) rl.Rectangle {
 	// basically just use this so that the caller doesn't have to call float32() themself
 	width_f32 := float32(width)
 	height_f32 := float32(height)
@@ -60,7 +60,7 @@ func getVerticalMenuRect[num Number](x num, y num, width num, height num) rl.Rec
 	}
 }
 
-func getMenuButtonsVertical(menu rl.Rectangle, count int) []rl.Rectangle {
+func GetMenuButtonsVertical(menu rl.Rectangle, count int) []rl.Rectangle {
 	btn_h := float32(rl.GetScreenHeight()) * button_height_ratio
 	btn_w := float32(rl.GetScreenWidth()) * button_width_ratio
 
@@ -114,7 +114,7 @@ func getMenuButtonsVertical(menu rl.Rectangle, count int) []rl.Rectangle {
 	return buttons
 }
 
-func getMenuButtonsHorizontal(menu rl.Rectangle, count int) []rl.Rectangle {
+func GetMenuButtonsHorizontal(menu rl.Rectangle, count int) []rl.Rectangle {
 	btn_h := float32(rl.GetScreenHeight()) * button_height_ratio
 	btn_w := float32(rl.GetScreenWidth()) * button_width_ratio
 
