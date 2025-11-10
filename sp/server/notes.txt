@@ -42,3 +42,9 @@ Since I have the entire payload, I can use very easy substring operations to con
 Game Play
 1. Connect to a server
 2. List Rooms
+
+FIX
+\n is sent as a last character
+Needs to be trimmed off
+To ale pořád že musíš mít parser, kterej nepředpokládá že to co přečteš z recvfrom() je kompletní zpráva.
+Pořád to musí být parser jako mam vpravo, kterej jde byte po bytu
