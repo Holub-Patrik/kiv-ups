@@ -1,0 +1,11 @@
+So... I can't really detect if the server closed connection
+Thus I have to add some kind of passive attempt to get a response.
+If no response is coming for a long time, I have to assume the server is dead and disconnect the connection
+
+add a proper sliding window message handling
+currently InTCPtor breaks the reading, since it sends the header, and a bit of the message, but not the whole message
+
+Restructure this shit
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+I need to have a drawThread and GameThread, each having access to some joint datastructures
+

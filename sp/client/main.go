@@ -2,72 +2,13 @@ package main
 
 import (
 	"fmt"
-
-	w "poker-client/window"
+	unet "poker-client/ups_net"
 
 	rg "github.com/gen2brain/raylib-go/raygui"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-type Player struct {
-	nick   string
-	tokens uint64
-}
-
-type State int
-type NetworkState int
-
-const (
-	Main State = iota
-	ServerSelect
-	Connecting
-)
-
-const (
-	Disconnected NetworkState = iota
-	FailedToConnect
-	Connected
-	ConnTimeout
-)
-
-type ProgCtx struct {
-	window_changed bool
-	close          bool
-	state          State
-	main_menu      M_Main
-	server_menu    M_Server
-	conn_menu      M_Connecting
-	network        NetworkCtx
-}
-
-type NetworkCtx struct {
-	host  string
-	port  string
-	state NetworkState
-}
-
-type M_Main struct {
-	cont_rec    rl.Rectangle
-	back_col    rl.Color
-	connect_box rl.Rectangle
-	close_box   rl.Rectangle
-}
-
-type M_Server struct {
-	active_input   int
-	cont_rec       rl.Rectangle
-	back_col       rl.Color
-	ip_input_box   rl.Rectangle
-	port_input_box rl.Rectangle
-	confirm_box    rl.Rectangle
-}
-
-type M_Connecting struct {
-	cont_rec   rl.Rectangle
-	back_col   rl.Color
-	state_box  rl.Rectangle
-	cancel_box rl.Rectangle
-}
+var _ = unet.MsgAcceptor{}
 
 func initProgCtx() ProgCtx {
 	ctx := ProgCtx{}
@@ -83,60 +24,16 @@ func initProgCtx() ProgCtx {
 	ctx.state = Main
 
 	ctx.network = initNetworkCtx()
+	ctx.done_chan = make(chan bool)
 
 	return ctx
 }
 
 func initNetworkCtx() NetworkCtx {
 	ctx := NetworkCtx{}
+	ctx.handler = unet.InitNetHandler()
 	ctx.state = Disconnected
 	return ctx
-}
-
-func (ctx *ProgCtx) calculate() {
-	screen_width := rl.GetScreenWidth()
-	screen_height := rl.GetScreenHeight()
-
-	ctx.main_menu.cont_rec = w.GetVerticalMenuRect(
-		0,
-		0,
-		screen_width,
-		screen_height,
-	)
-
-	ctx.server_menu.cont_rec = w.GetHorizontalMenuRect(
-		ctx.main_menu.cont_rec.X,
-		ctx.main_menu.cont_rec.Y,
-		ctx.main_menu.cont_rec.Width,
-		ctx.main_menu.cont_rec.Height,
-	)
-
-	ctx.conn_menu.cont_rec = w.GetHorizontalMenuRect(
-		ctx.main_menu.cont_rec.X,
-		ctx.main_menu.cont_rec.Y,
-		ctx.main_menu.cont_rec.Width,
-		ctx.main_menu.cont_rec.Height,
-	)
-
-	main_menu_buttons := w.GetMenuButtonsVertical(ctx.main_menu.cont_rec, 2)
-	ctx.main_menu.connect_box = main_menu_buttons[0]
-	ctx.main_menu.close_box = main_menu_buttons[1]
-
-	connect_menu_buttons := w.GetMenuButtonsHorizontal(ctx.server_menu.cont_rec, 3)
-	ctx.server_menu.ip_input_box = connect_menu_buttons[0]
-	ctx.server_menu.port_input_box = connect_menu_buttons[1]
-	ctx.server_menu.confirm_box = connect_menu_buttons[2]
-
-	conn_menu_buttons := w.GetMenuButtonsVertical(ctx.conn_menu.cont_rec, 2)
-	ctx.conn_menu.state_box = conn_menu_buttons[0]
-	ctx.conn_menu.cancel_box = conn_menu_buttons[1]
-}
-
-func (ctx *ProgCtx) drawMainMenu() {
-	rl.DrawRectangleRec(ctx.main_menu.cont_rec, ctx.main_menu.back_col)
-	rl.DrawRectangleLinesEx(ctx.main_menu.cont_rec, 5, rl.White)
-	rl.DrawRectangleLinesEx(ctx.main_menu.connect_box, 5, rl.White)
-	rl.DrawRectangleLinesEx(ctx.main_menu.close_box, 5, rl.White)
 }
 
 func (ctx *ProgCtx) handleMainMenu() {
@@ -153,14 +50,6 @@ func (ctx *ProgCtx) handleMainMenu() {
 	if connect_pressed {
 		ctx.state = ServerSelect
 	}
-}
-
-func (ctx *ProgCtx) drawServerMenu() {
-	rl.DrawRectangleRec(ctx.server_menu.cont_rec, ctx.server_menu.back_col)
-	rl.DrawRectangleLinesEx(ctx.server_menu.cont_rec, 5, rl.White)
-	rl.DrawRectangleLinesEx(ctx.server_menu.ip_input_box, 5, rl.White)
-	rl.DrawRectangleLinesEx(ctx.server_menu.port_input_box, 5, rl.White)
-	rl.DrawRectangleLinesEx(ctx.server_menu.confirm_box, 5, rl.White)
 }
 
 func (ctx *ProgCtx) handleServerMenu() {
@@ -198,21 +87,35 @@ func (ctx *ProgCtx) handleServerMenu() {
 
 	confirm_clicked := rg.Button(ctx.server_menu.confirm_box, "Confirm")
 	if confirm_clicked {
-		fmt.Printf("Pressed connect: %s:%s\n", ctx.network.host, ctx.network.port)
+		go func() {
+			success := ctx.network.handler.Connect(ctx.network.host, ctx.network.port)
+			ctx.done_chan <- success
+		}()
 		ctx.state = Connecting
 	}
-}
-
-func (ctx *ProgCtx) drawConnectingMenu() {
-	rl.DrawRectangleRec(ctx.conn_menu.cont_rec, ctx.conn_menu.back_col)
-	rl.DrawRectangleLinesEx(ctx.conn_menu.cancel_box, 5, rl.White)
-	rl.DrawRectangleLinesEx(ctx.conn_menu.state_box, 5, rl.White)
-	rl.DrawText("Connecting...", int32(ctx.conn_menu.state_box.X), int32(ctx.conn_menu.state_box.Y), 20, rl.White)
 }
 
 func (ctx *ProgCtx) handleConnectingMenu() {
 	ctx.drawMainMenu()
 	ctx.drawConnectingMenu()
+
+	success, done := <-ctx.done_chan
+	if !done {
+		fmt.Println("Still Connecting")
+		return
+	}
+
+	if !success {
+		ctx.state = ServerSelect
+	} else {
+		go ctx.network.handler.Run()
+		// startup message passing from and to server
+		ctx.state = GameConnect
+	}
+}
+
+func (ctx *ProgCtx) handleGameConnect() {
+
 }
 
 func main() {
@@ -233,39 +136,44 @@ func main() {
 	var possibly_new_screen_height int32 = screen_height
 
 	for !rl.WindowShouldClose() && !ctx.close {
-		possibly_new_screen_width = int32(rl.GetScreenWidth())
-		possibly_new_screen_height = int32(rl.GetScreenHeight())
+		{ // recalculation
+			possibly_new_screen_width = int32(rl.GetScreenWidth())
+			possibly_new_screen_height = int32(rl.GetScreenHeight())
 
-		should_recalc := false
-		if possibly_new_screen_width != screen_width {
-			should_recalc = true
-			screen_width = possibly_new_screen_width
+			should_recalc := false
+			if possibly_new_screen_width != screen_width {
+				should_recalc = true
+				screen_width = possibly_new_screen_width
+			}
+
+			if possibly_new_screen_height != screen_height {
+				should_recalc = true
+				screen_height = possibly_new_screen_height
+			}
+
+			if should_recalc {
+				ctx.calculate()
+			}
 		}
 
-		if possibly_new_screen_height != screen_height {
-			should_recalc = true
-			screen_height = possibly_new_screen_height
-		}
+		{ // drawing
+			rl.BeginDrawing()
+			rl.DrawFPS(0, 0)
+			rl.ClearBackground(rl.Black)
 
-		if should_recalc {
-			ctx.calculate()
+			switch ctx.state {
+			case Main:
+				ctx.handleMainMenu()
+			case ServerSelect:
+				ctx.handleServerMenu()
+			case Connecting:
+				ctx.handleConnectingMenu()
+			case GameConnect:
+				ctx.handleGameConnect()
+			default:
+				ctx.close = true
+			}
+			rl.EndDrawing()
 		}
-
-		rl.BeginDrawing()
-		rl.DrawFPS(0, 0)
-		rl.ClearBackground(rl.Black)
-
-		switch ctx.state {
-		case Main:
-			ctx.handleMainMenu()
-		case ServerSelect:
-			ctx.handleServerMenu()
-		case Connecting:
-			ctx.handleConnectingMenu()
-		default:
-			ctx.close = true
-		}
-		rl.EndDrawing()
 	}
-
 }

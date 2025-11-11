@@ -67,7 +67,7 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 
 func (nh *NetHandler) Run() {
 	// startups the 2 actual compute threads
-	go nh.SendMessages() // startup sending messages
+	go nh.sendMessages() // startup sending messages
 	acceptor := MsgAcceptor{
 		conn:     nh.conn,
 		msg_chan: nh.msg_in,
@@ -84,7 +84,7 @@ func (nh *NetHandler) Run() {
 	close(nh.msg_shutdown)
 }
 
-func (nh *NetHandler) SendMessages() {
+func (nh *NetHandler) sendMessages() {
 	msg_builder := strings.Builder{}
 	for msg := range nh.msg_out {
 		byte_msg := []byte(msg.ToStringWithBuilder(&msg_builder))
