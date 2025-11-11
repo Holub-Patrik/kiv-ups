@@ -2,203 +2,84 @@ package ups_net
 
 import (
 	"fmt"
+	"net"
 	"strings"
 )
 
-// use net.Dial("tcp", host+":"+port)
+const bufferSize = 100
 
-const (
-	MSG_CODE_SIZE    uint64 = 4
-	PAYLOAD_LEN_SIZE uint64 = 4
-	SIZESTR_LEN      uint64 = 4
-)
-
-type Msg struct {
-	has_payload bool
-	code        string
-	payload     string
+type NetMsg struct {
+	code    string
+	payload string
 }
 
-type ConnManager struct {
-	msg_chan chan Msg
+// opening/closing socket
+type NetHandler struct {
+	connection  net.Conn
+	msg_in      chan NetMsg
+	msg_out     chan NetMsg
+	in_shutdown chan struct{}
 }
 
-type MsgReader struct {
-	msg_chan chan Msg
+// receiving messages from client
+type MsgAcceptor struct {
+	connection   net.Conn
+	msg_chan     chan NetMsg
+	msg_shutdown chan struct{}
 }
 
-type MainPart int
-type ParserState int
-type MsgType byte
+func InitNetHandler() NetHandler {
+	msg_in := make(chan NetMsg, 100)
+	msg_out := make(chan NetMsg, 100)
+	shutdown_in := make(chan struct{})
 
-const (
-	Magic_1 MainPart = iota
-	Magic_2
-	Magic_3
-	Type
-	Code
-	Size
-	Payload
-	Endline
-)
-
-const (
-	OK ParserState = iota
-	Done
-	Invalid
-)
-
-const (
-	PayloadMsg   MsgType = 'P'
-	NoPayloadMsg MsgType = 'N'
-)
-
-type ParseResults struct {
-	error_occured bool
-	parser_done   bool
-	code          string
-	bytes_parsed  uint64
-	msg_type      MsgType
-	payload       string
-}
-
-type Parser struct {
-	payload     strings.Builder
-	code        strings.Builder
-	phase       MainPart
-	msg_type    MsgType
-	size_index  uint64
-	code_index  uint64
-	payload_len uint64
-}
-
-func InitParser() Parser {
-	return Parser{
-		payload:     strings.Builder{},
-		code:        strings.Builder{},
-		phase:       Magic_1,
-		msg_type:    'P',
-		size_index:  0,
-		code_index:  0,
-		payload_len: 0,
+	netHandler := NetHandler{
+		msg_in:      msg_in,
+		msg_out:     msg_out,
+		in_shutdown: shutdown_in,
 	}
+
+	return netHandler
 }
 
-func (p *Parser) ResetParser() {
-	p.payload.Reset()
-	p.code.Reset()
-	p.phase = Magic_1
-	p.msg_type = 'P'
-	p.size_index = 0
-	p.code_index = 0
-	p.payload_len = 0
+// Attempts to connect to the given IP
+// If it for any reason fails, it returns false
+// If it connects, it sets the networkHandler connection to the retrieved connection
+func (nh *NetHandler) Connect(host string, port string) bool {
+	maybe_conn, err := net.Dial("tcp", host+":"+port)
+	if err != nil {
+		return false
+	}
+
+	nh.connection = maybe_conn
+	return true
 }
 
-func (p *Parser) ParseByte(char byte) ParserState {
-	switch p.phase {
-	case Magic_1:
-		if char != 'P' {
-			fmt.Println("Invalid Magic")
-			return Invalid
-		}
-		p.phase = Magic_2
+func (nh *NetHandler) Run() {
 
-	case Magic_2:
-		if char != 'K' {
-			fmt.Println("Invalid Magic")
-			return Invalid
-		}
-		p.phase = Magic_3
+}
 
-	case Magic_3:
-		if char != 'R' {
-			fmt.Println("Invalid Magic")
-			return Invalid
-		}
-		p.phase = Type
-
-	case Type:
-		if char != 'N' && char != 'P' {
-			fmt.Println("Unknown message type")
-			return Invalid
-		}
-		p.phase = Code
-
-	case Code:
-		p.code.WriteByte(char)
-		p.code_index++
-
-		if p.code_index >= MSG_CODE_SIZE {
-			if p.msg_type == NoPayloadMsg {
-				p.phase = Endline
-			} else {
-				p.phase = Size
-			}
-		}
-
-	case Size:
-		if char < '0' || char > '9' {
-			fmt.Println("Non numeric character in size")
-			return Invalid
-		}
-
-		p.payload_len = p.payload_len*10 + (uint64(char) - '0')
-		p.size_index++
-
-	case Payload:
-		p.payload.WriteByte(char)
-
-		if uint64(p.payload.Len()) == p.payload_len {
-			p.phase = Endline
-		}
-
-	case Endline:
-		if char == '\n' {
-			return Done
+func (nh *NetHandler) SendMessages() {
+	msg_builder := strings.Builder{}
+	for msg := range nh.msg_out {
+		msg_builder.Write([]byte("PKR"))
+		payload_len := len(msg.payload)
+		if payload_len > 0 {
+			msg_builder.WriteByte('P')
 		} else {
-			return Invalid
+			msg_builder.WriteByte('N')
 		}
+		msg_builder.Write([]byte(msg.code))
+		if payload_len > 0 {
+			len_str := fmt.Sprintf("%04d", payload_len)
+
+			msg_builder.Write([]byte(len_str))
+			msg_builder.Write([]byte(msg.payload))
+		}
+		msg_builder.WriteByte('\n')
+
+		nh.connection.Write([]byte(msg_builder.String()))
+		msg_builder.Reset()
 	}
-
-	return OK
-}
-
-func (p *Parser) GetPayload() string {
-	return p.payload.String()
-}
-
-func (p *Parser) ParseBytes(bytes []byte) ParseResults {
-	res := ParseResults{}
-
-	var i uint64 = 0
-	for {
-		if i >= uint64(len(bytes)) {
-			break
-		}
-
-		if res.parser_done || res.error_occured {
-			break
-		}
-
-		state := p.ParseByte(bytes[i])
-		switch state {
-		case OK:
-			continue
-		case Done:
-			res.parser_done = true
-		case Invalid:
-			res.error_occured = true
-		}
-	}
-
-	if res.parser_done {
-		res.msg_type = p.msg_type
-		res.code = p.code.String()
-		if p.msg_type == PayloadMsg {
-			res.payload = p.GetPayload()
-		}
-	}
-
-	res.bytes_parsed = i
-	return res
+	// this should happen when the msg_out is closed
 }
