@@ -72,16 +72,14 @@ type Parser struct {
 	payload_len uint64
 }
 
-func InitParser() Parser {
-	return Parser{
-		payload:     strings.Builder{},
-		code:        strings.Builder{},
-		phase:       Magic_1,
-		msg_type:    'P',
-		size_index:  0,
-		code_index:  0,
-		payload_len: 0,
-	}
+func (p *Parser) Init() {
+	p.payload = strings.Builder{}
+	p.code = strings.Builder{}
+	p.phase = Magic_1
+	p.msg_type = 'P'
+	p.size_index = 0
+	p.code_index = 0
+	p.payload_len = 0
 }
 
 func (p *Parser) ResetParser() {

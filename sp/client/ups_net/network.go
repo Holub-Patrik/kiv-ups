@@ -2,11 +2,20 @@ package ups_net
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"strings"
+	"time"
 )
 
-const bufferSize = 100
+const chanBufSize = 100
+const arrBufSize = 256
+const magicStr = "PKR"
+
+const (
+	PAYLOAD_INDENTIFIER   byte = 'P'
+	NOPAYLOAD_INDENTIFIER byte = 'N'
+)
 
 type NetMsg struct {
 	code    string
@@ -14,29 +23,30 @@ type NetMsg struct {
 }
 
 // opening/closing socket
+// This has to be included within the Game Thread so it can ask for messages from the network thread
 type NetHandler struct {
-	connection  net.Conn
-	msg_in      chan NetMsg
-	msg_out     chan NetMsg
-	in_shutdown chan struct{}
+	conn         net.Conn
+	msg_in       chan NetMsg
+	msg_out      chan NetMsg
+	msg_shutdown chan bool
 }
 
 // receiving messages from client
 type MsgAcceptor struct {
-	connection   net.Conn
-	msg_chan     chan NetMsg
-	msg_shutdown chan struct{}
+	conn     net.Conn
+	msg_chan chan NetMsg
+	shutdown chan bool
 }
 
 func InitNetHandler() NetHandler {
-	msg_in := make(chan NetMsg, 100)
-	msg_out := make(chan NetMsg, 100)
-	shutdown_in := make(chan struct{})
+	msg_in := make(chan NetMsg, chanBufSize)
+	msg_out := make(chan NetMsg, chanBufSize)
+	shutdown_in := make(chan bool)
 
 	netHandler := NetHandler{
-		msg_in:      msg_in,
-		msg_out:     msg_out,
-		in_shutdown: shutdown_in,
+		msg_in:       msg_in,
+		msg_out:      msg_out,
+		msg_shutdown: shutdown_in,
 	}
 
 	return netHandler
@@ -51,35 +61,130 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 		return false
 	}
 
-	nh.connection = maybe_conn
+	nh.conn = maybe_conn
 	return true
 }
 
 func (nh *NetHandler) Run() {
+	// startups the 2 actual compute threads
+	go nh.SendMessages() // startup sending messages
+	acceptor := MsgAcceptor{
+		conn:     nh.conn,
+		msg_chan: nh.msg_in,
+		shutdown: nh.msg_shutdown,
+	}
+	go acceptor.AcceptMessages() // startup receiving messages
 
+	// waits until the messages stop coming or error happens
+	_ = <-nh.msg_shutdown
+
+	// close everything gracefully
+	close(nh.msg_in)
+	close(nh.msg_out)
+	close(nh.msg_shutdown)
 }
 
 func (nh *NetHandler) SendMessages() {
 	msg_builder := strings.Builder{}
 	for msg := range nh.msg_out {
-		msg_builder.Write([]byte("PKR"))
-		payload_len := len(msg.payload)
-		if payload_len > 0 {
-			msg_builder.WriteByte('P')
-		} else {
-			msg_builder.WriteByte('N')
-		}
-		msg_builder.Write([]byte(msg.code))
-		if payload_len > 0 {
-			len_str := fmt.Sprintf("%04d", payload_len)
-
-			msg_builder.Write([]byte(len_str))
-			msg_builder.Write([]byte(msg.payload))
-		}
-		msg_builder.WriteByte('\n')
-
-		nh.connection.Write([]byte(msg_builder.String()))
-		msg_builder.Reset()
+		byte_msg := []byte(msg.ToStringWithBuilder(&msg_builder))
+		nh.conn.Write(byte_msg)
 	}
 	// this should happen when the msg_out is closed
+}
+
+// creates the string that can be transmitted with network.Write()
+func (msg *NetMsg) ToString() string {
+	builder := strings.Builder{}
+	builder.WriteString(magicStr)
+
+	payload_len := len(msg.payload)
+	if payload_len > 0 {
+		builder.WriteByte('P')
+	} else {
+		builder.WriteByte('N')
+	}
+
+	builder.Write([]byte(msg.code))
+	if payload_len > 0 {
+		len_str := fmt.Sprintf("%04d", payload_len)
+
+		builder.Write([]byte(len_str))
+		builder.Write([]byte(msg.payload))
+	}
+
+	builder.WriteByte('\n')
+	return builder.String()
+}
+
+// creates the string that can be transmitted with network.Write()
+func (msg *NetMsg) ToStringWithBuilder(builder *strings.Builder) string {
+	builder.WriteString(magicStr)
+
+	payload_len := len(msg.payload)
+	if payload_len > 0 {
+		builder.WriteByte(PAYLOAD_INDENTIFIER)
+	} else {
+		builder.WriteByte(NOPAYLOAD_INDENTIFIER)
+	}
+
+	builder.WriteString(msg.code)
+	if payload_len > 0 {
+		len_str := fmt.Sprintf("%04d", payload_len)
+
+		builder.WriteString(len_str)
+		builder.WriteString(msg.payload)
+	}
+
+	builder.WriteByte('\n')
+	ret_str := builder.String()
+	builder.Reset()
+
+	return ret_str
+}
+
+func (self *MsgAcceptor) AcceptMessages() {
+	fmt.Println("Accepter Thread Starting")
+	buffer := [arrBufSize]byte{}
+
+	parser := Parser{}
+	parser.Init()
+
+	stop := false
+
+	for !stop {
+		// waits for 20 milliseconds if anything is received
+		deadline := time.Now().Add(time.Millisecond * 20)
+		self.conn.SetReadDeadline(deadline)
+		bytes_read, err := self.conn.Read(buffer[:])
+
+		if err != nil || err != io.EOF {
+			continue
+		}
+
+		var total_parsed_bytes uint64 = 0
+		results := ParseResults{}
+
+		for {
+			results = parser.ParseBytes(buffer[:bytes_read])
+
+			if results.error_occured {
+				stop = true
+				break
+			}
+
+			if results.parser_done {
+				self.msg_chan <- NetMsg{code: results.code, payload: results.payload}
+				parser.ResetParser()
+			}
+
+			total_parsed_bytes += results.bytes_parsed
+			if total_parsed_bytes >= uint64(bytes_read) {
+				break
+			}
+		}
+	}
+
+	self.shutdown <- true
+	fmt.Println("Accepter Thread Ending")
 }
