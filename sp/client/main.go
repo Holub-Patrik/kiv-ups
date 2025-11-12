@@ -3,12 +3,11 @@ package main
 import (
 	"fmt"
 	unet "poker-client/ups_net"
+	"time"
 
 	rg "github.com/gen2brain/raylib-go/raygui"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
-
-var _ = unet.MsgAcceptor{}
 
 func initProgCtx() ProgCtx {
 	ctx := ProgCtx{}
@@ -109,14 +108,71 @@ func (ctx *ProgCtx) handleConnectingMenu() {
 		ctx.state = ServerSelect
 	} else {
 		go ctx.network.handler.Run()
-		// startup message passing from and to server
-		ctx.state = GameConnect
+		go ctx.gameThread()
 	}
 }
 
-func (ctx *ProgCtx) handleGameConnect() {
+// I need to show the 3 other player
+// My player
+// Choose action buttons
+// TextInput for bet
+// Button for bet
+// Button for fold
+// Button for check
+// Button for all-in
+// Button for disconnect
+func (ctx *ProgCtx) drawGame() {}
 
+func (ctx *ProgCtx) gameThread() {
+	// first connect stuffs, then onto the game loop
+	for {
+		switch ctx.state {
+		case Connecting:
+			ctx.network.handler.SendMessage(unet.NetMsg{Code: "CONN", Payload: ""})
+			msg, ok := ctx.network.handler.GetMessage(time.Minute)
+			// server didn't answer
+			if !ok {
+				ctx.state = Main
+				return
+			}
+
+			// sever didn't send ok
+			if msg.Code != "00OK" {
+				ctx.state = Main
+				return
+			}
+			ctx.state = AskingForRooms
+		case AskingForRooms:
+			ctx.network.handler.SendMessage(unet.NetMsg{Code: "ROMS", Payload: ""})
+			// here I have to receive data until
+			rooms := make([]unet.NetMsg, 0)
+			for {
+				msg, ok := ctx.network.handler.GetMessage(time.Minute)
+				if !ok {
+					ctx.state = Main
+					return
+				}
+
+				if msg.Code == "ROOM" {
+					rooms = append(rooms, msg)
+				}
+
+				if msg.Code == "DONE" {
+					break
+				}
+			}
+
+			ctx.state = RoomSelect
+
+		case RoomSelect:
+			// here I need to be checking if any of the rooms change, so I change the relevant data in the list
+		}
+	}
 }
+
+func (ctx *ProgCtx) handleRoomAsk() {}
+
+func (ctx *ProgCtx) handleRoomSelect() {}
 
 func main() {
 	rl.SetConfigFlags(rl.FlagWindowResizable)
@@ -168,8 +224,12 @@ func main() {
 				ctx.handleServerMenu()
 			case Connecting:
 				ctx.handleConnectingMenu()
-			case GameConnect:
-				ctx.handleGameConnect()
+			case AskingForRooms:
+				ctx.handleRoomAsk()
+			case RoomSelect:
+				ctx.handleRoomSelect()
+			case Game:
+				ctx.drawGame()
 			default:
 				ctx.close = true
 			}

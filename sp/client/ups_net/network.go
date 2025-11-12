@@ -18,8 +18,8 @@ const (
 )
 
 type NetMsg struct {
-	code    string
-	payload string
+	Code    string
+	Payload string
 }
 
 // opening/closing socket
@@ -65,6 +65,32 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 	return true
 }
 
+// technically can block
+func (nh *NetHandler) SendMessage(msg NetMsg) {
+	nh.msg_out <- msg
+}
+
+// returns msg and if the msg came
+func (nh *NetHandler) GetMessage(timeout time.Duration) (NetMsg, bool) {
+	end := time.Now().Add(timeout)
+	got_msg := false
+	msg_out := NetMsg{}
+	for {
+		if time.Now().Compare(end) >= 0 {
+			break
+		}
+
+		msg, ok := <-nh.msg_in
+		if !ok {
+			continue
+		}
+
+		msg_out = msg
+	}
+
+	return msg_out, got_msg
+}
+
 func (nh *NetHandler) Run() {
 	// startups the 2 actual compute threads
 	go nh.sendMessages() // startup sending messages
@@ -98,19 +124,19 @@ func (msg *NetMsg) ToString() string {
 	builder := strings.Builder{}
 	builder.WriteString(magicStr)
 
-	payload_len := len(msg.payload)
+	payload_len := len(msg.Payload)
 	if payload_len > 0 {
 		builder.WriteByte('P')
 	} else {
 		builder.WriteByte('N')
 	}
 
-	builder.Write([]byte(msg.code))
+	builder.Write([]byte(msg.Code))
 	if payload_len > 0 {
 		len_str := fmt.Sprintf("%04d", payload_len)
 
 		builder.Write([]byte(len_str))
-		builder.Write([]byte(msg.payload))
+		builder.Write([]byte(msg.Payload))
 	}
 
 	builder.WriteByte('\n')
@@ -121,19 +147,19 @@ func (msg *NetMsg) ToString() string {
 func (msg *NetMsg) ToStringWithBuilder(builder *strings.Builder) string {
 	builder.WriteString(magicStr)
 
-	payload_len := len(msg.payload)
+	payload_len := len(msg.Payload)
 	if payload_len > 0 {
 		builder.WriteByte(PAYLOAD_INDENTIFIER)
 	} else {
 		builder.WriteByte(NOPAYLOAD_INDENTIFIER)
 	}
 
-	builder.WriteString(msg.code)
+	builder.WriteString(msg.Code)
 	if payload_len > 0 {
 		len_str := fmt.Sprintf("%04d", payload_len)
 
 		builder.WriteString(len_str)
-		builder.WriteString(msg.payload)
+		builder.WriteString(msg.Payload)
 	}
 
 	builder.WriteByte('\n')
@@ -174,7 +200,7 @@ func (self *MsgAcceptor) AcceptMessages() {
 			}
 
 			if results.parser_done {
-				self.msg_chan <- NetMsg{code: results.code, payload: results.payload}
+				self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
 				parser.ResetParser()
 			}
 
