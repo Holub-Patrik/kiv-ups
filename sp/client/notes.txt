@@ -9,3 +9,16 @@ Restructure this shit
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 I need to have a drawThread and GameThread, each having access to some joint datastructures
 
+Create this
+interface RGComponent() {
+  Draw() // has to tak no arguments
+  Init(width int, height int)
+  ReCalculate(width int, height int)
+  Register(RGComponent component, id int)
+  Unregister(RGComponent component, id int)
+}
+
+The Register function allows to create inherited objects, which will be recalculated the parent Values
+If this works, it will be amazing
+This still however leaves the question of how to deal with clicabled in a better way. Aka how to pass in/out needed data from global context
+
