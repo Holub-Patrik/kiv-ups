@@ -65,9 +65,18 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 	return true
 }
 
-// technically can block
-func (nh *NetHandler) SendMessage(msg NetMsg) {
-	nh.msg_out <- msg
+func (nh *NetHandler) Close() {
+	close(nh.msg_in)
+	close(nh.msg_out)
+	close(nh.msg_shutdown)
+}
+
+func (nh *NetHandler) MsgIn() chan NetMsg {
+	return nh.msg_in
+}
+
+func (nh *NetHandler) MsgOut() chan NetMsg {
+	return nh.msg_out
 }
 
 // returns msg and if the msg came
@@ -104,10 +113,7 @@ func (nh *NetHandler) Run() {
 	// waits until the messages stop coming or error happens
 	_ = <-nh.msg_shutdown
 
-	// close everything gracefully
-	close(nh.msg_in)
-	close(nh.msg_out)
-	close(nh.msg_shutdown)
+	nh.Close()
 }
 
 func (nh *NetHandler) sendMessages() {

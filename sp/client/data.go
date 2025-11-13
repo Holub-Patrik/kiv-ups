@@ -1,104 +1,81 @@
 package main
 
 import (
+	unet "poker-client/ups_net" // Using alias 'unet' from your main.go
+	"sync"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
-	unet "poker-client/ups_net"
 )
 
-type State int
-type NetworkState int
-type PlayerState int
+// UIScreen represents the current view the user should see.
+type UIScreen int
 
 const (
-	Main State = iota
-	ServerSelect
-	Connecting
-	AskingForRooms
-	RoomSelect
-	RoomQueue
-	Game
+	ScreenMainMenu UIScreen = iota
+	ScreenServerSelect
+	ScreenConnecting
+	ScreenRoomSelect
+	ScreenInGame
+	ScreenError
 )
 
-const (
-	Disconnected NetworkState = iota
-	FailedToConnect
-	Connected
-	ConnTimeout
-)
-
-type ProgCtx struct {
-	window_changed bool
-	close          bool
-	trigger        bool
-	state          State
-	last_state     State
-	main_menu      M_Main
-	server_menu    M_Server
-	conn_menu      M_Connecting
-	network        NetworkCtx
-	done_chan      chan bool
-	game           GameCtx
-}
-
-type NetworkCtx struct {
-	host    string
-	port    string
-	state   NetworkState
-	handler unet.NetHandler
-}
-
+// Room defines the data for a single game room.
+// You'll need to write a function to parse this from your [RoomData] payload.
 type Room struct {
-	current_players int
-	turn            int
+	ID             string // A unique ID for the room
+	Name           string
+	CurrentPlayers int
+	MaxPlayers     int
+	// Add other fields as needed
 }
 
-type Player struct {
-	nick      string
-	tokens    uint64
-	connected bool
-	folded    bool
+// GameState holds all data that the renderer needs.
+// It must be protected by a mutex.
+type GameState struct {
+	Screen       UIScreen
+	Rooms        map[string]Room // Map[RoomID] -> Room
+	ErrorMessage string
+	IsConnecting bool
 
-	// if 0, then it means he checked
-	// has to be checked when betting round is being done
-	bet     uint64
-	waiting int // -1 -> not waiting, >= 0 waiting
+	// UI-specific state
+	ServerIP   string
+	ServerPort string
 }
 
-// Cards are dealt -> Betting round
-// 3 cards of river shown -> Betting round
-// 1 more card of river shown -> Betting round
-// 1 more card of river shown -> Betting round
-// Done
-type GameCtx struct {
-	p1        Player
-	p2        Player
-	p3        Player
-	p4        Player
-	turn      int // total turn
-	p_turn    int // player turn
-	bet_round int
-	rooms     []Room
+// UserInputEvent is the interface for events from the Render thread to the Game thread.
+type UserInputEvent interface{}
+
+// --- Specific User Input Events ---
+
+// EvtConnectClicked is sent when the user confirms host/port.
+type EvtConnectClicked struct {
+	Host string
+	Port string
 }
 
-type M_Main struct {
-	cont_rec    rl.Rectangle
-	back_col    rl.Color
-	connect_box rl.Rectangle
-	close_box   rl.Rectangle
+// EvtCancelConnectClicked is sent from the "Connecting" screen.
+type EvtCancelConnectClicked struct{}
+
+// EvtRoomJoinClicked is sent when the user clicks a room.
+type EvtRoomJoinClicked struct {
+	RoomID string
 }
 
-type M_Server struct {
-	active_input   int
-	cont_rec       rl.Rectangle
-	back_col       rl.Color
-	ip_input_box   rl.Rectangle
-	port_input_box rl.Rectangle
-	confirm_box    rl.Rectangle
-}
+// EvtQuitClicked is sent when the user clicks the "Close" button.
+type EvtQuitClicked struct{}
 
-type M_Connecting struct {
-	cont_rec   rl.Rectangle
-	back_col   rl.Color
-	state_box  rl.Rectangle
-	cancel_box rl.Rectangle
+// ProgCtx holds the global application context.
+type ProgCtx struct {
+	// Shared State
+	State      GameState
+	StateMutex sync.RWMutex // Protects State
+
+	// Channels
+	UserInputChan chan UserInputEvent     // Render -> Game
+	NetMsgInChan  chan unet.NetMsg        // Network -> Game
+	NetMsgOutChan chan unet.NetMsg        // Game -> Network
+	DoneChan      chan bool               // Game -> Main (to signal shutdown)
+	NetHandler    unet.NetHandler         // Your network handler
+	ShouldClose   bool                    // Flag to signal all goroutines to stop
+	Layout        map[string]rl.Rectangle // A simple map for UI rects
 }

@@ -1,239 +1,211 @@
+// main.go
 package main
 
 import (
+	unet "poker-client/ups_net" // Your alias
+	w "poker-client/window"     // Your alias
+
 	"fmt"
-	unet "poker-client/ups_net"
-	"time"
+	"sync"
 
 	rg "github.com/gen2brain/raylib-go/raygui"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// --- Include the new data.go and gamethread.go files in your build ---
+
+// --- Your existing ProgCtx, M_Main, etc. are replaced by data.go ---
+// --- Your existing NetworkCtx, Room, Player, etc. are replaced by data.go ---
+
+// initProgCtx sets up the entire application context.
 func initProgCtx() ProgCtx {
 	ctx := ProgCtx{}
 
-	ctx.calculate()
+	// Init Channels
+	ctx.UserInputChan = make(chan UserInputEvent, 10) // Buffered
+	// NetMsgInChan and NetMsgOutChan will be set by the GameThread on connection
+	ctx.DoneChan = make(chan bool)
 
-	ctx.main_menu.back_col = rl.DarkGray
-	ctx.server_menu.back_col = rl.Gray
-	ctx.conn_menu.back_col = rl.Gray
+	// Init State
+	ctx.State.Screen = ScreenMainMenu
+	ctx.State.Rooms = make(map[string]Room)
+	ctx.StateMutex = sync.RWMutex{}
 
-	ctx.server_menu.active_input = 0
-	ctx.close = false
-	ctx.state = Main
+	// Init Network
+	ctx.NetHandler = unet.InitNetHandler()
 
-	ctx.network = initNetworkCtx()
-	ctx.done_chan = make(chan bool)
+	// Init UI Layout
+	ctx.Layout = make(map[string]rl.Rectangle)
+	// You will call your 'calculate' function here
+	calculateLayout(&ctx) // We'll adapt your 'calculate'
 
 	return ctx
 }
 
-func initNetworkCtx() NetworkCtx {
-	ctx := NetworkCtx{}
-	ctx.handler = unet.InitNetHandler()
-	ctx.state = Disconnected
-	return ctx
+// calculateLayout (replaces your 'calculate' receiver)
+func calculateLayout(ctx *ProgCtx) {
+	// This function now just calculates rectangles and stores them
+	// in ctx.Layout. It doesn't modify menu structs.
+	screenWidth := float32(rl.GetScreenWidth())
+	screenHeight := float32(rl.GetScreenHeight())
+
+	// Example:
+	mainMenuCont := w.GetVerticalMenuRect(0, 0, screenWidth, screenHeight)
+	mainMenuButtons := w.GetMenuButtonsVertical(mainMenuCont, 2)
+	ctx.Layout["MainMenu_ConnectBtn"] = mainMenuButtons[0]
+	ctx.Layout["MainMenu_CloseBtn"] = mainMenuButtons[1]
+
+	serverMenuCont := w.GetHorizontalMenuRect(0, 0, screenWidth, screenHeight)
+	serverMenuButtons := w.GetMenuButtonsHorizontal(serverMenuCont, 3)
+	ctx.Layout["Server_ContRec"] = serverMenuCont
+	ctx.Layout["Server_IPBox"] = serverMenuButtons[0]
+	ctx.Layout["Server_PortBox"] = serverMenuButtons[1]
+	ctx.Layout["Server_ConfirmBtn"] = serverMenuButtons[2]
+
+	// ... etc. for all UI elements
 }
 
-func (ctx *ProgCtx) handleMainMenu() {
-	ctx.drawMainMenu()
+// --- Main Drawing Functions ---
+// These now read from ctx.State and ctx.Layout
 
-	connect_pressed := rg.Button(ctx.main_menu.connect_box, "Connect")
-	close_pressed := rg.Button(ctx.main_menu.close_box, "Close")
+func drawMainMenu(ctx *ProgCtx) {
+	// Draw background, etc.
+	// rl.DrawRectangleRec(ctx.Layout["MainMenu_ContRec"], rl.DarkGray)
 
-	if close_pressed {
-		ctx.close = true
-		return
+	if rg.Button(ctx.Layout["MainMenu_ConnectBtn"], "Connect") {
+		// Don't change state! Send event.
+		ctx.StateMutex.Lock()
+		ctx.State.Screen = ScreenServerSelect
+		ctx.StateMutex.Unlock()
 	}
-
-	if connect_pressed {
-		ctx.state = ServerSelect
-	}
-}
-
-func (ctx *ProgCtx) handleServerMenu() {
-	ctx.drawMainMenu()
-	ctx.drawServerMenu()
-
-	editablePort := false
-	editableIP := false
-
-	if rl.IsKeyPressed(rl.KeyTab) {
-		ctx.server_menu.active_input++
-	}
-	active_input := ctx.server_menu.active_input
-
-	isMouseOnIPBox := rl.CheckCollisionPointRec(rl.GetMousePosition(), ctx.server_menu.ip_input_box)
-	isMouseOnPortBox := rl.CheckCollisionPointRec(rl.GetMousePosition(), ctx.server_menu.port_input_box)
-
-	if isMouseOnIPBox {
-		active_input = 0
-	}
-
-	if isMouseOnPortBox {
-		active_input = 1
-	}
-
-	switch active_input % 2 {
-	case 0:
-		editableIP = true
-	case 1:
-		editablePort = true
-	}
-
-	rg.TextBox(ctx.server_menu.ip_input_box, &ctx.network.host, 16, editableIP)
-	rg.TextBox(ctx.server_menu.port_input_box, &ctx.network.port, 6, editablePort)
-
-	confirm_clicked := rg.Button(ctx.server_menu.confirm_box, "Confirm")
-	if confirm_clicked {
-		go func() {
-			success := ctx.network.handler.Connect(ctx.network.host, ctx.network.port)
-			ctx.done_chan <- success
-		}()
-		ctx.state = Connecting
+	if rg.Button(ctx.Layout["MainMenu_CloseBtn"], "Close") {
+		ctx.UserInputChan <- EvtQuitClicked{}
 	}
 }
 
-func (ctx *ProgCtx) handleConnectingMenu() {
-	ctx.drawMainMenu()
-	ctx.drawConnectingMenu()
+func drawServerMenu(ctx *ProgCtx) {
+	// Draw background
+	rl.DrawRectangleRec(ctx.Layout["Server_ContRec"], rl.Gray)
 
-	success, done := <-ctx.done_chan
-	if !done {
-		fmt.Println("Still Connecting")
-		return
+	// This is tricky. raygui's TextBox modifies the string directly.
+	// We need to lock, copy, unlock, draw, lock, update, unlock.
+	// A simpler way for now:
+	ctx.StateMutex.Lock()
+	// This is still a bit racy, but better.
+	// A more robust solution would be to buffer input locally in main.go.
+	rg.TextBox(ctx.Layout["Server_IPBox"], &ctx.State.ServerIP, 16, true)
+	rg.TextBox(ctx.Layout["Server_PortBox"], &ctx.State.ServerPort, 6, true)
+	ip := ctx.State.ServerIP
+	port := ctx.State.ServerPort
+	ctx.StateMutex.Unlock()
+
+	if rg.Button(ctx.Layout["Server_ConfirmBtn"], "Confirm") {
+		// Send the input to the game thread for processing
+		ctx.UserInputChan <- EvtConnectClicked{Host: ip, Port: port}
 	}
+	// TODO: Add a "Back" button
+}
 
-	if !success {
-		ctx.state = ServerSelect
-	} else {
-		go ctx.network.handler.Run()
-		go ctx.gameThread()
+func drawConnectingMenu(ctx *ProgCtx) {
+	// This menu is purely informational.
+	// The GameThread will change the state when ready.
+	// rl.DrawRectangleRec(...)
+	rl.DrawText("Connecting...", 100, 100, 20, rl.White)
+
+	// Optionally, add a cancel button
+	if rg.Button(ctx.Layout["Connecting_CancelBtn"], "Cancel") {
+		ctx.UserInputChan <- EvtCancelConnectClicked{}
 	}
 }
 
-// I need to show the 3 other player
-// My player
-// Choose action buttons
-// TextInput for bet
-// Button for bet
-// Button for fold
-// Button for check
-// Button for all-in
-// Button for disconnect
-func (ctx *ProgCtx) drawGame() {}
+func drawRoomSelect(ctx *ProgCtx) {
+	// Read-lock the state to get the room list
+	ctx.StateMutex.RLock()
+	// Copy the rooms to a local slice to avoid holding the lock while drawing
+	rooms := make([]Room, 0, len(ctx.State.Rooms))
+	for _, room := range ctx.State.Rooms {
+		rooms = append(rooms, room)
+	}
+	ctx.StateMutex.RUnlock()
 
-func (ctx *ProgCtx) gameThread() {
-	// first connect stuffs, then onto the game loop
-	for {
-		switch ctx.state {
-		case Connecting:
-			ctx.network.handler.SendMessage(unet.NetMsg{Code: "CONN", Payload: ""})
-			msg, ok := ctx.network.handler.GetMessage(time.Minute)
-			// server didn't answer
-			if !ok {
-				ctx.state = Main
-				return
-			}
-
-			// sever didn't send ok
-			if msg.Code != "00OK" {
-				ctx.state = Main
-				return
-			}
-			ctx.state = AskingForRooms
-		case AskingForRooms:
-			ctx.network.handler.SendMessage(unet.NetMsg{Code: "ROMS", Payload: ""})
-			// here I have to receive data until
-			rooms := make([]unet.NetMsg, 0)
-			for {
-				msg, ok := ctx.network.handler.GetMessage(time.Minute)
-				if !ok {
-					ctx.state = Main
-					return
-				}
-
-				if msg.Code == "ROOM" {
-					rooms = append(rooms, msg)
-				}
-
-				if msg.Code == "DONE" {
-					break
-				}
-			}
-
-			ctx.state = RoomSelect
-
-		case RoomSelect:
-			// here I need to be checking if any of the rooms change, so I change the relevant data in the list
-		}
+	// Now, iterate over the local 'rooms' slice and draw them
+	// ...
+	y := 100
+	for _, room := range rooms {
+		// roomText
+		_ = fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
+		// Draw the roomText and a "Join" button
+		// if rg.Button(rl.Rectangle{...}, "Join") {
+		// 	  ctx.UserInputChan <- EvtRoomJoinClicked{RoomID: room.ID}
+		// }
+		y += 40
 	}
 }
 
-func (ctx *ProgCtx) handleRoomAsk() {}
-
-func (ctx *ProgCtx) handleRoomSelect() {}
+// --- Main Function ---
 
 func main() {
 	rl.SetConfigFlags(rl.FlagWindowResizable)
 	var (
-		screen_width  int32 = 1600
-		screen_height int32 = 1000
+		screenWidth  int32 = 1600
+		screenHeight int32 = 1000
 	)
-	rl.InitWindow(screen_width, screen_height, "Test client")
-
+	rl.InitWindow(screenWidth, screenHeight, "Test client")
 	defer rl.CloseWindow()
 
 	rl.SetTargetFPS(60)
 
 	ctx := initProgCtx()
 
-	var possibly_new_screen_width int32 = screen_width
-	var possibly_new_screen_height int32 = screen_height
+	// Start the "Game Thread"
+	go gameThread(&ctx)
 
-	for !rl.WindowShouldClose() && !ctx.close {
-		{ // recalculation
-			possibly_new_screen_width = int32(rl.GetScreenWidth())
-			possibly_new_screen_height = int32(rl.GetScreenHeight())
-
-			should_recalc := false
-			if possibly_new_screen_width != screen_width {
-				should_recalc = true
-				screen_width = possibly_new_screen_width
-			}
-
-			if possibly_new_screen_height != screen_height {
-				should_recalc = true
-				screen_height = possibly_new_screen_height
-			}
-
-			if should_recalc {
-				ctx.calculate()
-			}
+	for !rl.WindowShouldClose() && !ctx.ShouldClose {
+		// --- Recalculation (Your logic is fine) ---
+		if rl.IsWindowResized() {
+			calculateLayout(&ctx)
 		}
 
-		{ // drawing
-			rl.BeginDrawing()
-			rl.DrawFPS(0, 0)
-			rl.ClearBackground(rl.Black)
+		// --- Drawing ---
+		rl.BeginDrawing()
+		rl.DrawFPS(0, 0)
+		rl.ClearBackground(rl.Black)
 
-			switch ctx.state {
-			case Main:
-				ctx.handleMainMenu()
-			case ServerSelect:
-				ctx.handleServerMenu()
-			case Connecting:
-				ctx.handleConnectingMenu()
-			case AskingForRooms:
-				ctx.handleRoomAsk()
-			case RoomSelect:
-				ctx.handleRoomSelect()
-			case Game:
-				ctx.drawGame()
-			default:
-				ctx.close = true
-			}
-			rl.EndDrawing()
+		// Get the current screen safely
+		ctx.StateMutex.RLock()
+		currentScreen := ctx.State.Screen
+		ctx.StateMutex.RUnlock()
+
+		// Draw based on state
+		switch currentScreen {
+		case ScreenMainMenu:
+			drawMainMenu(&ctx)
+		case ScreenServerSelect:
+			// You can overlay menus
+			drawMainMenu(&ctx)
+			drawServerMenu(&ctx)
+		case ScreenConnecting:
+			drawMainMenu(&ctx) // Draw main menu dimmed?
+			drawConnectingMenu(&ctx)
+		case ScreenRoomSelect:
+			drawRoomSelect(&ctx)
+		case ScreenInGame:
+			// drawGame(&ctx)
+		case ScreenError:
+			// drawError(&ctx)
 		}
+
+		rl.EndDrawing()
 	}
+
+	// --- Shutdown ---
+	// Signal GameThread to stop (if not already)
+	ctx.ShouldClose = true
+	// Send a dummy event to wake it up if it's sleeping on the channel
+	ctx.UserInputChan <- EvtQuitClicked{}
+
+	fmt.Println("Main: Waiting for GameThread to shut down...")
+	// Wait for GameThread to confirm shutdown
+	<-ctx.DoneChan
+	fmt.Println("Main: Shutdown complete.")
 }
