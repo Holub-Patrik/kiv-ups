@@ -4,6 +4,45 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+type RGComponent interface {
+	Draw()
+	Calculate(bounds rl.Rectangle, position uint64)
+	GetBounds() rl.Rectangle
+}
+
+type MainMenu struct {
+	bounds rl.Rectangle
+	color  rl.Color
+}
+
+func (self *MainMenu) Draw() {
+	// draw itself
+	rl.DrawRectangleRec(self.bounds, self.color)
+	rl.DrawRectangleLinesEx(self.bounds, 5, rl.White)
+}
+
+func (self *MainMenu) Calculate(outer rl.Rectangle, position uint64) {
+	const width_ratio float32 = 0.7
+	const height_ratio float32 = 0.6
+
+	inner_width := (outer.Width - (margin * 2)) * width_ratio
+	inner_height := (outer.Height - (margin * 2)) * height_ratio
+
+	center_x := outer.X + outer.Width/2 - inner_width/2
+	center_y := outer.Y + outer.Height/2 - inner_height/2
+
+	self.bounds = rl.Rectangle{
+		X:      center_x,
+		Y:      center_y,
+		Width:  inner_width,
+		Height: inner_height,
+	}
+}
+
+func (self *MainMenu) GetBounds() rl.Rectangle {
+	return self.bounds
+}
+
 const (
 	margin                float32 = 10
 	hor_menu_width_ratio  float32 = 0.7
