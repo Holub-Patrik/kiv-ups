@@ -2,9 +2,8 @@ package main
 
 import (
 	unet "poker-client/ups_net" // Using alias 'unet' from your main.go
+	w "poker-client/window"
 	"sync"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 // UIScreen represents the current view the user should see.
@@ -45,8 +44,6 @@ type GameState struct {
 // UserInputEvent is the interface for events from the Render thread to the Game thread.
 type UserInputEvent interface{}
 
-// --- Specific User Input Events ---
-
 // EvtConnectClicked is sent when the user confirms host/port.
 type EvtConnectClicked struct {
 	Host string
@@ -64,18 +61,25 @@ type EvtRoomJoinClicked struct {
 // EvtQuitClicked is sent when the user clicks the "Close" button.
 type EvtQuitClicked struct{}
 
+type UIStore struct {
+	MainMenu     w.RGComponent
+	ServerSelect w.RGComponent
+	Connecting   w.RGComponent
+	// RoomSelect is built dynamically, so it's not stored here
+}
+
 // ProgCtx holds the global application context.
 type ProgCtx struct {
-	// Shared State
 	State      GameState
 	StateMutex sync.RWMutex // Protects State
 
-	// Channels
-	UserInputChan chan UserInputEvent     // Render -> Game
-	NetMsgInChan  chan unet.NetMsg        // Network -> Game
-	NetMsgOutChan chan unet.NetMsg        // Game -> Network
-	DoneChan      chan bool               // Game -> Main (to signal shutdown)
-	NetHandler    unet.NetHandler         // Your network handler
-	ShouldClose   bool                    // Flag to signal all goroutines to stop
-	Layout        map[string]rl.Rectangle // A simple map for UI rects
+	UserInputChan chan UserInputEvent // Render -> Game
+	NetMsgInChan  chan unet.NetMsg    // Network -> Game
+	NetMsgOutChan chan unet.NetMsg    // Game -> Network
+	DoneChan      chan bool           // Game -> Main (to signal shutdown)
+
+	NetHandler  unet.NetHandler // Your network handler
+	ShouldClose bool            // Flag to signal all goroutines to stop
+
+	UI UIStore
 }

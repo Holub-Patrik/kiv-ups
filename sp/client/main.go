@@ -1,21 +1,17 @@
-// main.go
 package main
 
 import (
-	unet "poker-client/ups_net" // Your alias
-	w "poker-client/window"     // Your alias
+	unet "poker-client/ups_net"
+	w "poker-client/window" // Your new compose library
 
 	"fmt"
+	"strings"
 	"sync"
 
-	rg "github.com/gen2brain/raylib-go/raygui"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// --- Include the new data.go and gamethread.go files in your build ---
-
-// --- Your existing ProgCtx, M_Main, etc. are replaced by data.go ---
-// --- Your existing NetworkCtx, Room, Player, etc. are replaced by data.go ---
+// --- gamethread.go is unchanged and still required ---
 
 // initProgCtx sets up the entire application context.
 func initProgCtx() ProgCtx {
@@ -23,126 +19,114 @@ func initProgCtx() ProgCtx {
 
 	// Init Channels
 	ctx.UserInputChan = make(chan UserInputEvent, 10) // Buffered
-	// NetMsgInChan and NetMsgOutChan will be set by the GameThread on connection
 	ctx.DoneChan = make(chan bool)
 
 	// Init State
 	ctx.State.Screen = ScreenMainMenu
 	ctx.State.Rooms = make(map[string]Room)
 	ctx.StateMutex = sync.RWMutex{}
+	ctx.State.ServerIP = "127.0.0.1"
+	ctx.State.ServerPort = "8080"
 
 	// Init Network
 	ctx.NetHandler = unet.InitNetHandler()
 
-	// Init UI Layout
-	ctx.Layout = make(map[string]rl.Rectangle)
-	// You will call your 'calculate' function here
-	calculateLayout(&ctx) // We'll adapt your 'calculate'
+	// Init UI
+	buildUI(&ctx)
 
 	return ctx
 }
 
-// calculateLayout (replaces your 'calculate' receiver)
-func calculateLayout(ctx *ProgCtx) {
-	// This function now just calculates rectangles and stores them
-	// in ctx.Layout. It doesn't modify menu structs.
-	screenWidth := float32(rl.GetScreenWidth())
-	screenHeight := float32(rl.GetScreenHeight())
+func buildUI(ctx *ProgCtx) {
+	mainMenuVStack := w.NewVStack(10)
+	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect"))
+	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_CloseBtn", "Close"))
 
-	// Example:
-	mainMenuCont := w.GetVerticalMenuRect(0, 0, screenWidth, screenHeight)
-	mainMenuButtons := w.GetMenuButtonsVertical(mainMenuCont, 2)
-	ctx.Layout["MainMenu_ConnectBtn"] = mainMenuButtons[0]
-	ctx.Layout["MainMenu_CloseBtn"] = mainMenuButtons[1]
+	mainMenuPanel := w.NewPanelComponent(rl.DarkGray)
+	mainMenuPanel.AddChild(mainMenuVStack)
 
-	serverMenuCont := w.GetHorizontalMenuRect(0, 0, screenWidth, screenHeight)
-	serverMenuButtons := w.GetMenuButtonsHorizontal(serverMenuCont, 3)
-	ctx.Layout["Server_ContRec"] = serverMenuCont
-	ctx.Layout["Server_IPBox"] = serverMenuButtons[0]
-	ctx.Layout["Server_PortBox"] = serverMenuButtons[1]
-	ctx.Layout["Server_ConfirmBtn"] = serverMenuButtons[2]
+	ctx.UI.MainMenu = mainMenuPanel
 
-	// ... etc. for all UI elements
+	serverMenuHStack := w.NewHStack(10)
+	serverMenuHStack.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
+	serverMenuHStack.AddChild(w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, &ctx.StateMutex, 6))
+	serverMenuHStack.AddChild(w.NewButtonComponent("Server_ConfirmBtn", "Confirm"))
+
+	serverMenuPanel := w.NewPanelComponent(rl.Gray)
+	serverMenuPanel.AddChild(serverMenuHStack)
+
+	ctx.UI.ServerSelect = serverMenuPanel
+
+	connectingVStack := w.NewVStack(10)
+	connectingVStack.AddChild(w.NewLabelComponent("Connecting...", 20, rl.White))
+	connectingVStack.AddChild(w.NewButtonComponent("Connecting_CancelBtn", "Cancel"))
+
+	connectingVPanel := w.NewPanelComponent(rl.Gray)
+	connectingVPanel.AddChild(connectingVStack)
+
+	ctx.UI.Connecting = connectingVPanel
 }
 
-// --- Main Drawing Functions ---
-// These now read from ctx.State and ctx.Layout
+func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
+	roomListVStack := w.NewVStack(5)
+	roomListVStack.AddChild(w.NewLabelComponent("Select a Room", 24, rl.White))
 
-func drawMainMenu(ctx *ProgCtx) {
-	// Draw background, etc.
-	// rl.DrawRectangleRec(ctx.Layout["MainMenu_ContRec"], rl.DarkGray)
-
-	if rg.Button(ctx.Layout["MainMenu_ConnectBtn"], "Connect") {
-		// Don't change state! Send event.
-		ctx.StateMutex.Lock()
-		ctx.State.Screen = ScreenServerSelect
-		ctx.StateMutex.Unlock()
-	}
-	if rg.Button(ctx.Layout["MainMenu_CloseBtn"], "Close") {
-		ctx.UserInputChan <- EvtQuitClicked{}
-	}
-}
-
-func drawServerMenu(ctx *ProgCtx) {
-	// Draw background
-	rl.DrawRectangleRec(ctx.Layout["Server_ContRec"], rl.Gray)
-
-	// This is tricky. raygui's TextBox modifies the string directly.
-	// We need to lock, copy, unlock, draw, lock, update, unlock.
-	// A simpler way for now:
-	ctx.StateMutex.Lock()
-	// This is still a bit racy, but better.
-	// A more robust solution would be to buffer input locally in main.go.
-	rg.TextBox(ctx.Layout["Server_IPBox"], &ctx.State.ServerIP, 16, true)
-	rg.TextBox(ctx.Layout["Server_PortBox"], &ctx.State.ServerPort, 6, true)
-	ip := ctx.State.ServerIP
-	port := ctx.State.ServerPort
-	ctx.StateMutex.Unlock()
-
-	if rg.Button(ctx.Layout["Server_ConfirmBtn"], "Confirm") {
-		// Send the input to the game thread for processing
-		ctx.UserInputChan <- EvtConnectClicked{Host: ip, Port: port}
-	}
-	// TODO: Add a "Back" button
-}
-
-func drawConnectingMenu(ctx *ProgCtx) {
-	// This menu is purely informational.
-	// The GameThread will change the state when ready.
-	// rl.DrawRectangleRec(...)
-	rl.DrawText("Connecting...", 100, 100, 20, rl.White)
-
-	// Optionally, add a cancel button
-	if rg.Button(ctx.Layout["Connecting_CancelBtn"], "Cancel") {
-		ctx.UserInputChan <- EvtCancelConnectClicked{}
-	}
-}
-
-func drawRoomSelect(ctx *ProgCtx) {
-	// Read-lock the state to get the room list
 	ctx.StateMutex.RLock()
-	// Copy the rooms to a local slice to avoid holding the lock while drawing
+	// Copy to local slice to avoid holding lock
 	rooms := make([]Room, 0, len(ctx.State.Rooms))
 	for _, room := range ctx.State.Rooms {
 		rooms = append(rooms, room)
 	}
 	ctx.StateMutex.RUnlock()
 
-	// Now, iterate over the local 'rooms' slice and draw them
-	// ...
-	y := 100
-	for _, room := range rooms {
-		// roomText
-		_ = fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
-		// Draw the roomText and a "Join" button
-		// if rg.Button(rl.Rectangle{...}, "Join") {
-		// 	  ctx.UserInputChan <- EvtRoomJoinClicked{RoomID: room.ID}
-		// }
-		y += 40
+	if len(rooms) == 0 {
+		roomListVStack.AddChild(w.NewLabelComponent("No rooms available.", 18, rl.Gray))
 	}
+
+	for _, room := range rooms {
+		roomText := fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
+		roomListVStack.AddChild(w.NewButtonComponent("join_"+room.ID, roomText))
+	}
+
+	roomListVStack.AddChild(w.NewButtonComponent("RoomSelect_BackBtn", "Back"))
+	return roomListVStack
 }
 
-// --- Main Function ---
+func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
+	switch event.SourceID {
+	case "MainMenu_ConnectBtn":
+		ctx.StateMutex.Lock()
+		ctx.State.Screen = ScreenServerSelect
+		ctx.StateMutex.Unlock()
+
+	case "MainMenu_CloseBtn":
+		ctx.UserInputChan <- EvtQuitClicked{}
+
+	case "Server_ConfirmBtn":
+		// Get the IP/Port safely from the state
+		ctx.StateMutex.RLock()
+		host := ctx.State.ServerIP
+		port := ctx.State.ServerPort
+		ctx.StateMutex.RUnlock()
+		ctx.UserInputChan <- EvtConnectClicked{Host: host, Port: port}
+
+	case "Connecting_CancelBtn":
+		ctx.UserInputChan <- EvtCancelConnectClicked{}
+
+	case "RoomSelect_BackBtn":
+		// TODO: Tell game thread to disconnect or go back
+		ctx.StateMutex.Lock()
+		ctx.State.Screen = ScreenMainMenu
+		ctx.StateMutex.Unlock()
+
+	default:
+		// Handle dynamic room buttons
+		if strings.HasPrefix(event.SourceID, "join_") {
+			roomID := strings.TrimPrefix(event.SourceID, "join_")
+			ctx.UserInputChan <- EvtRoomJoinClicked{RoomID: roomID}
+		}
+	}
+}
 
 func main() {
 	rl.SetConfigFlags(rl.FlagWindowResizable)
@@ -160,10 +144,43 @@ func main() {
 	// Start the "Game Thread"
 	go gameThread(&ctx)
 
+	componentsToDraw := make([]w.RGComponent, 0)
+
 	for !rl.WindowShouldClose() && !ctx.ShouldClose {
-		// --- Recalculation (Your logic is fine) ---
-		if rl.IsWindowResized() {
-			calculateLayout(&ctx)
+		// --- Recalculation ---
+		screenBounds := rl.Rectangle{
+			X: 0, Y: 0,
+			Width:  float32(rl.GetScreenWidth()),
+			Height: float32(rl.GetScreenHeight()),
+		}
+
+		// Get the current screen safely
+		ctx.StateMutex.RLock()
+		currentScreen := ctx.State.Screen
+		ctx.StateMutex.RUnlock()
+
+		switch currentScreen {
+		case ScreenMainMenu:
+			ctx.UI.MainMenu.Calculate(screenBounds)
+			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu)
+
+		case ScreenServerSelect:
+			ctx.UI.MainMenu.Calculate(screenBounds)
+			ctx.UI.ServerSelect.Calculate(ctx.UI.MainMenu.GetBounds())
+			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, ctx.UI.ServerSelect)
+
+		case ScreenConnecting:
+			ctx.UI.MainMenu.Calculate(screenBounds)
+			ctx.UI.Connecting.Calculate(ctx.UI.MainMenu.GetBounds())
+			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
+
+		case ScreenRoomSelect:
+			roomSelect := buildRoomSelectUI(&ctx)
+			roomSelect.Calculate(screenBounds)
+			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, roomSelect)
+
+		case ScreenInGame:
+		case ScreenError:
 		}
 
 		// --- Drawing ---
@@ -171,41 +188,27 @@ func main() {
 		rl.DrawFPS(0, 0)
 		rl.ClearBackground(rl.Black)
 
-		// Get the current screen safely
-		ctx.StateMutex.RLock()
-		currentScreen := ctx.State.Screen
-		ctx.StateMutex.RUnlock()
-
-		// Draw based on state
-		switch currentScreen {
-		case ScreenMainMenu:
-			drawMainMenu(&ctx)
-		case ScreenServerSelect:
-			// You can overlay menus
-			drawMainMenu(&ctx)
-			drawServerMenu(&ctx)
-		case ScreenConnecting:
-			drawMainMenu(&ctx) // Draw main menu dimmed?
-			drawConnectingMenu(&ctx)
-		case ScreenRoomSelect:
-			drawRoomSelect(&ctx)
-		case ScreenInGame:
-			// drawGame(&ctx)
-		case ScreenError:
-			// drawError(&ctx)
+		uiEventChannel := make(chan w.UIEvent, 10)
+		for _, component := range componentsToDraw {
+			component.Draw(uiEventChannel)
 		}
 
+		componentsToDraw = componentsToDraw[:0]
+
 		rl.EndDrawing()
+
+		close(uiEventChannel)
+		for event := range uiEventChannel {
+			handleUIEvent(&ctx, event)
+		}
 	}
 
 	// --- Shutdown ---
-	// Signal GameThread to stop (if not already)
 	ctx.ShouldClose = true
-	// Send a dummy event to wake it up if it's sleeping on the channel
-	ctx.UserInputChan <- EvtQuitClicked{}
+	ctx.UserInputChan <- EvtQuitClicked{} // Wake up game thread
+	ctx.NetHandler.Close()                // Close network connection
 
 	fmt.Println("Main: Waiting for GameThread to shut down...")
-	// Wait for GameThread to confirm shutdown
 	<-ctx.DoneChan
 	fmt.Println("Main: Shutdown complete.")
 }
