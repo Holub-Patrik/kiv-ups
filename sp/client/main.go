@@ -39,8 +39,8 @@ func initProgCtx() ProgCtx {
 
 func buildUI(ctx *ProgCtx) {
 	mainMenuVStack := w.NewVStack(10)
-	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect"))
-	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_CloseBtn", "Close"))
+	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect", 150, 50))
+	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_CloseBtn", "Close", 150, 50))
 
 	mainMenuPanel := w.NewPanelComponent(rl.DarkGray)
 	mainMenuPanel.AddChild(mainMenuVStack)
@@ -50,7 +50,7 @@ func buildUI(ctx *ProgCtx) {
 	serverMenuHStack := w.NewHStack(10)
 	serverMenuHStack.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
 	serverMenuHStack.AddChild(w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, &ctx.StateMutex, 6))
-	serverMenuHStack.AddChild(w.NewButtonComponent("Server_ConfirmBtn", "Confirm"))
+	serverMenuHStack.AddChild(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
 
 	serverMenuPanel := w.NewPanelComponent(rl.Gray)
 	serverMenuPanel.AddChild(serverMenuHStack)
@@ -59,7 +59,7 @@ func buildUI(ctx *ProgCtx) {
 
 	connectingVStack := w.NewVStack(10)
 	connectingVStack.AddChild(w.NewLabelComponent("Connecting...", 20, rl.White))
-	connectingVStack.AddChild(w.NewButtonComponent("Connecting_CancelBtn", "Cancel"))
+	connectingVStack.AddChild(w.NewButtonComponent("Connecting_CancelBtn", "Cancel", 150, 50))
 
 	connectingVPanel := w.NewPanelComponent(rl.Gray)
 	connectingVPanel.AddChild(connectingVStack)
@@ -85,10 +85,10 @@ func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
 
 	for _, room := range rooms {
 		roomText := fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
-		roomListVStack.AddChild(w.NewButtonComponent("join_"+room.ID, roomText))
+		roomListVStack.AddChild(w.NewButtonComponent("join_"+room.ID, roomText, 150, 50))
 	}
 
-	roomListVStack.AddChild(w.NewButtonComponent("RoomSelect_BackBtn", "Back"))
+	roomListVStack.AddChild(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
 	return roomListVStack
 }
 
