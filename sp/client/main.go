@@ -38,38 +38,39 @@ func initProgCtx() ProgCtx {
 }
 
 func buildUI(ctx *ProgCtx) {
-	mainMenuVStack := w.NewVStack(10)
-	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect", 150, 50))
-	mainMenuVStack.AddChild(w.NewButtonComponent("MainMenu_CloseBtn", "Close", 150, 50))
+	mainMenu := w.NewVStack(10)
+	connect_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect", 150, 50))
+	close_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_CloseBtn", "Close", 150, 50))
+	mainMenu.AddChild(connect_btn)
+	mainMenu.AddChild(close_btn)
 
-	mainMenuPanel := w.NewPanelComponent(rl.DarkGray)
-	mainMenuPanel.AddChild(mainMenuVStack)
+	mainMenuPanel := w.NewPanelComponent(rl.DarkGray, mainMenu)
 
 	ctx.UI.MainMenu = mainMenuPanel
 
-	serverMenuHStack := w.NewHStack(10)
-	serverMenuHStack.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
-	serverMenuHStack.AddChild(w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, &ctx.StateMutex, 6))
-	serverMenuHStack.AddChild(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
+	serverMenu := w.NewHStack(10)
+	serverMenu.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
+	serverMenu.AddChild(w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, &ctx.StateMutex, 6))
+	serverMenu.AddChild(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
 
-	serverMenuPanel := w.NewPanelComponent(rl.Gray)
-	serverMenuPanel.AddChild(serverMenuHStack)
+	serverMenuPanel := w.NewPanelComponent(rl.Gray, serverMenu)
 
 	ctx.UI.ServerSelect = serverMenuPanel
 
-	connectingVStack := w.NewVStack(10)
-	connectingVStack.AddChild(w.NewLabelComponent("Connecting...", 20, rl.White))
-	connectingVStack.AddChild(w.NewButtonComponent("Connecting_CancelBtn", "Cancel", 150, 50))
+	connecting := w.NewVStack(10)
+	label := w.NewCenterComponent(w.NewLabelComponent("Connecting...", 20, rl.White))
+	cancel_btn := w.NewCenterComponent(w.NewButtonComponent("Connecting_CancelBtn", "Cancel", 150, 50))
+	connecting.AddChild(label)
+	connecting.AddChild(cancel_btn)
 
-	connectingVPanel := w.NewPanelComponent(rl.Gray)
-	connectingVPanel.AddChild(connectingVStack)
+	connectingVPanel := w.NewPanelComponent(rl.Gray, connecting)
 
 	ctx.UI.Connecting = connectingVPanel
 }
 
 func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
-	roomListVStack := w.NewVStack(5)
-	roomListVStack.AddChild(w.NewLabelComponent("Select a Room", 24, rl.White))
+	roomList := w.NewVStack(5)
+	roomList.AddChild(w.NewLabelComponent("Select a Room", 24, rl.White))
 
 	ctx.StateMutex.RLock()
 	// Copy to local slice to avoid holding lock
@@ -80,16 +81,17 @@ func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
 	ctx.StateMutex.RUnlock()
 
 	if len(rooms) == 0 {
-		roomListVStack.AddChild(w.NewLabelComponent("No rooms available.", 18, rl.Gray))
+		roomList.AddChild(w.NewLabelComponent("No rooms available.", 18, rl.Gray))
 	}
 
 	for _, room := range rooms {
 		roomText := fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
-		roomListVStack.AddChild(w.NewButtonComponent("join_"+room.ID, roomText, 150, 50))
+		roomList.AddChild(w.NewButtonComponent("join_"+room.ID, roomText, 150, 50))
 	}
 
-	roomListVStack.AddChild(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
-	return roomListVStack
+	roomList.AddChild(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
+
+	return roomList
 }
 
 func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
@@ -120,10 +122,9 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 		ctx.StateMutex.Unlock()
 
 	default:
-		// Handle dynamic room buttons
-		if strings.HasPrefix(event.SourceID, "join_") {
-			roomID := strings.TrimPrefix(event.SourceID, "join_")
-			ctx.UserInputChan <- EvtRoomJoinClicked{RoomID: roomID}
+		after, found := strings.CutPrefix(event.SourceID, "join_")
+		if found {
+			ctx.UserInputChan <- EvtRoomJoinClicked{RoomID: after}
 		}
 	}
 }
