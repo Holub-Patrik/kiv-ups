@@ -2,47 +2,43 @@ package main
 
 import (
 	"fmt"
-	unet "poker-client/ups_net" // Using alias 'unet' from your main.go
 	"strings"
+	"time"
+
+	unet "poker-client/ups_net"
 )
 
-// gameThread is the main logic loop of the application.
-// It should be run as a goroutine.
 func gameThread(ctx *ProgCtx) {
 	fmt.Println("GameThread started.")
-	// This ticker is for any game-loop logic, e.g., pings
 	// ticker := time.NewTicker(1 * time.Second)
 	// defer ticker.Stop()
 
-	// This is the Game Thread's main loop
 	for !ctx.ShouldClose {
 		select {
-		// --- Handle User Input ---
 		case input := <-ctx.UserInputChan:
 			handleUserInput(ctx, input)
 
-		// --- Handle Network Messages ---
 		case msg, ok := <-ctx.NetMsgInChan:
 			if !ok {
 				// Channel closed, network handler shut down
 				fmt.Println("NetMsgInChan closed. Shutting down GameThread.")
 				ctx.StateMutex.Lock()
 				ctx.State.Screen = ScreenMainMenu
-				// TODO: Add error notification
-				ctx.State.ErrorMessage = "Connection lost."
+				ctx.Popup.AddPopup("Connection lost.", time.Second*3)
 				ctx.StateMutex.Unlock()
 				ctx.ShouldClose = true
 				break
 			}
+			fmt.Println("GamneThread: Got message")
 
 			handleNetworkMessage(ctx, msg)
 
-			// --- Handle other periodic tasks ---
 			// case <-ticker.C:
-			// 	// e.g., send a PING message
 			// 	if ctx.State.Screen == ScreenInGame {
 			// 		ctx.NetMsgOutChan <- unet.NetMsg{Code: "PING"}
 			// 	}
+		default:
+			time.Sleep(time.Millisecond * 20)
 		}
 	}
 
@@ -61,7 +57,6 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 		ctx.State.IsConnecting = true
 		ctx.StateMutex.Unlock()
 
-		// Start connection in a separate goroutine so we don't block this loop
 		go func(host, port string) {
 			success := ctx.NetHandler.Connect(host, port)
 			fmt.Println("GameThread: Connect result:", success)
@@ -70,7 +65,7 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 				ctx.StateMutex.Lock()
 				ctx.State.Screen = ScreenServerSelect
 				// here I need to implement the notification system
-				ctx.State.ErrorMessage = "Failed to connect to " + host + ":" + port
+				ctx.Popup.AddPopup("Failed to connect to "+host+":"+port, time.Second*3)
 				ctx.State.IsConnecting = false
 				ctx.StateMutex.Unlock()
 				return
@@ -79,6 +74,7 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 			ctx.NetMsgInChan = ctx.NetHandler.MsgIn()
 			ctx.NetMsgOutChan = ctx.NetHandler.MsgOut()
 
+			// hmmm, this will slowly add more and more acceptor threads
 			go ctx.NetHandler.Run()
 
 			fmt.Println("GameThread: Sending CONN message")
@@ -102,27 +98,26 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 	fmt.Printf("GameThread: Received NetMsg Code: %s\n", msg.Code)
 
-	// Get current screen to provide context
 	ctx.StateMutex.RLock()
 	currentScreen := ctx.State.Screen
 	ctx.StateMutex.RUnlock()
 
+	if currentScreen == ScreenConnecting && msg.Code != "00OK" {
+		ctx.StateMutex.Lock()
+		ctx.State.Screen = ScreenMainMenu
+		ctx.Popup.AddPopup("Unexpected Response during connection", time.Second*3)
+		ctx.State.IsConnecting = false
+		ctx.StateMutex.Unlock()
+	}
+
 	switch msg.Code {
-	// --- Scenario: Connect ---
 	case "00OK":
 		if currentScreen == ScreenConnecting {
-			// This is the OK for our "CONN" message.
-			// Now, request the room list.
 			fmt.Println("GameThread: Connection OK, requesting rooms...")
 			ctx.NetMsgOutChan <- unet.NetMsg{Code: "RMRQ", Payload: ""}
-			// We are still in the "Connecting" screen, waiting for rooms.
 		}
-		// This is also the ACK for "ROOM". We don't need to do anything.
-
-		// This is also the ACK for "DONE". We don't need to do anything.
 
 	case "ROOM":
-		// Server is sending us a room.
 		room := deserializeRoom(msg.Payload) // You need to implement this!
 		fmt.Printf("GameThread: Received Room: ID=%s, Name=%s\n", room.ID, room.Name)
 		ctx.StateMutex.Lock()
@@ -132,7 +127,6 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 		ctx.State.Rooms[room.ID] = room
 		ctx.StateMutex.Unlock()
 
-		// Send ACK
 		ctx.NetMsgOutChan <- unet.NetMsg{Code: "00OK", Payload: ""}
 
 	case "DONE":
@@ -160,9 +154,8 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 
 	case "ERR": // Example error code
 		ctx.StateMutex.Lock()
-		// TODO: Add Notification
 		ctx.State.Screen = ScreenMainMenu
-		// ctx.State.ErrorMessage = msg.Payload // Show server error to user
+		ctx.Popup.AddPopup(msg.Payload, time.Second*3)
 		ctx.State.IsConnecting = false
 		ctx.StateMutex.Unlock()
 	}

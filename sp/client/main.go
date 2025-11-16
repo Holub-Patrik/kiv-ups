@@ -29,7 +29,8 @@ func initProgCtx() ProgCtx {
 	ctx.State.ServerPort = "8080"
 
 	// Init Network
-	ctx.NetHandler = unet.InitNetHandler()
+	ctx.NetHandler = unet.NewNetHandler()
+	ctx.Popup = *NewPopupManager()
 
 	// Init UI
 	buildUI(&ctx)
@@ -45,8 +46,9 @@ func buildUI(ctx *ProgCtx) {
 	mainMenu.AddChild(close_btn)
 
 	mainMenuPanel := w.NewPanelComponent(rl.DarkGray, mainMenu)
+	mainMenuBounds := w.NewBoundsBox(0.6, 0.8, mainMenuPanel)
 
-	ctx.UI.MainMenu = mainMenuPanel
+	ctx.UI.MainMenu = mainMenuBounds
 
 	serverMenu := w.NewHStack(10)
 	serverMenu.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
@@ -55,8 +57,9 @@ func buildUI(ctx *ProgCtx) {
 	serverMenu.AddChild(confirm_btn)
 
 	serverMenuPanel := w.NewPanelComponent(rl.Gray, serverMenu)
+	serverMenuBounds := w.NewBoundsBox(0.9, 0.9, serverMenuPanel)
 
-	ctx.UI.ServerSelect = serverMenuPanel
+	ctx.UI.ServerSelect = serverMenuBounds
 
 	connecting := w.NewVStack(10)
 	label := w.NewCenterComponent(w.NewLabelComponent("Connecting...", 20, rl.White))
@@ -64,9 +67,10 @@ func buildUI(ctx *ProgCtx) {
 	connecting.AddChild(label)
 	connecting.AddChild(cancel_btn)
 
-	connectingVPanel := w.NewPanelComponent(rl.Gray, connecting)
+	connectingPanel := w.NewPanelComponent(rl.Gray, connecting)
+	connectingBounds := w.NewBoundsBox(0.4, 0.4, connectingPanel)
 
-	ctx.UI.Connecting = connectingVPanel
+	ctx.UI.Connecting = connectingBounds
 }
 
 func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
@@ -132,10 +136,12 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 
 func main() {
 	rl.SetConfigFlags(rl.FlagWindowResizable)
-	var (
+
+	const (
 		screenWidth  int32 = 1600
 		screenHeight int32 = 1000
 	)
+
 	rl.InitWindow(screenWidth, screenHeight, "Test client")
 	defer rl.CloseWindow()
 
@@ -148,12 +154,30 @@ func main() {
 
 	componentsToDraw := make([]w.RGComponent, 0)
 
+	// meant for calculation/recalculation
+	screenBounds := rl.Rectangle{
+		X: 0, Y: 0,
+		Width:  float32(screenWidth),
+		Height: float32(screenHeight),
+	}
+
+	ctx.UI.MainMenu.Calculate(screenBounds)
+	ctx.UI.ServerSelect.Calculate(screenBounds)
+	ctx.UI.Connecting.Calculate(screenBounds)
+
 	for !rl.WindowShouldClose() && !ctx.ShouldClose {
-		// --- Recalculation ---
-		screenBounds := rl.Rectangle{
-			X: 0, Y: 0,
-			Width:  float32(rl.GetScreenWidth()),
-			Height: float32(rl.GetScreenHeight()),
+		recalculate := false
+		tmpScreenHeight := int32(rl.GetScreenHeight())
+		tmpScreenWidth := int32(rl.GetScreenWidth())
+
+		if tmpScreenHeight != screenHeight {
+			screenBounds.Height = float32(tmpScreenHeight)
+			recalculate = true
+		}
+
+		if tmpScreenWidth != screenWidth {
+			screenBounds.Width = float32(tmpScreenWidth)
+			recalculate = true
 		}
 
 		// Get the current screen safely
@@ -163,35 +187,52 @@ func main() {
 
 		switch currentScreen {
 		case ScreenMainMenu:
-			ctx.UI.MainMenu.Calculate(screenBounds)
+			if recalculate {
+				ctx.UI.MainMenu.Calculate(screenBounds)
+			}
 			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu)
 
 		case ScreenServerSelect:
-			ctx.UI.MainMenu.Calculate(screenBounds)
-			ctx.UI.ServerSelect.Calculate(ctx.UI.MainMenu.GetBounds())
+			if recalculate {
+				ctx.UI.MainMenu.Calculate(screenBounds)
+				ctx.UI.ServerSelect.Calculate(ctx.UI.MainMenu.GetBounds())
+			}
 			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, ctx.UI.ServerSelect)
 
 		case ScreenConnecting:
-			ctx.UI.MainMenu.Calculate(screenBounds)
-			ctx.UI.Connecting.Calculate(ctx.UI.MainMenu.GetBounds())
+			if recalculate {
+				ctx.UI.MainMenu.Calculate(screenBounds)
+				ctx.UI.Connecting.Calculate(ctx.UI.MainMenu.GetBounds())
+			}
 			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
 
 		case ScreenRoomSelect:
 			roomSelect := buildRoomSelectUI(&ctx)
+			// this needs to be calculated every time
 			roomSelect.Calculate(screenBounds)
 			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, roomSelect)
 
 		case ScreenInGame:
 		}
 
+		// calculate popups everytime
+		// as they come and go, they need to be all calculated:
+		// to change this I would need to change the definition of a popup
+		ctx.Popup.Calculate(screenBounds)
+
 		rl.BeginDrawing()
 		rl.DrawFPS(0, 0)
 		rl.ClearBackground(rl.Black)
 
 		uiEventChannel := make(chan w.UIEvent, 10)
+
 		for _, component := range componentsToDraw {
 			component.Draw(uiEventChannel)
 		}
+
+		// Draw popups
+		ctx.Popup.Draw(uiEventChannel)
+		ctx.Popup.Update()
 
 		componentsToDraw = componentsToDraw[:0]
 
@@ -206,7 +247,6 @@ func main() {
 	// --- Shutdown ---
 	ctx.ShouldClose = true
 	ctx.UserInputChan <- EvtQuitClicked{} // Wake up game thread
-	ctx.NetHandler.Close()                // Close network connection
 
 	fmt.Println("Main: Waiting for GameThread to shut down...")
 	<-ctx.DoneChan

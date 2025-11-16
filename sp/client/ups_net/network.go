@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"time"
 )
@@ -38,7 +39,7 @@ type MsgAcceptor struct {
 	shutdown chan bool
 }
 
-func InitNetHandler() NetHandler {
+func NewNetHandler() NetHandler {
 	msg_in := make(chan NetMsg, chanBufSize)
 	msg_out := make(chan NetMsg, chanBufSize)
 	shutdown_in := make(chan bool)
@@ -70,8 +71,8 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 }
 
 func (nh *NetHandler) Close() {
-	close(nh.msg_in)
 	close(nh.msg_out)
+	close(nh.msg_in)
 	close(nh.msg_shutdown)
 }
 
@@ -81,27 +82,6 @@ func (nh *NetHandler) MsgIn() chan NetMsg {
 
 func (nh *NetHandler) MsgOut() chan NetMsg {
 	return nh.msg_out
-}
-
-// returns msg and if the msg came
-func (nh *NetHandler) GetMessage(timeout time.Duration) (NetMsg, bool) {
-	end := time.Now().Add(timeout)
-	got_msg := false
-	msg_out := NetMsg{}
-	for {
-		if time.Now().Compare(end) >= 0 {
-			break
-		}
-
-		msg, ok := <-nh.msg_in
-		if !ok {
-			continue
-		}
-
-		msg_out = msg
-	}
-
-	return msg_out, got_msg
 }
 
 func (nh *NetHandler) Run() {
@@ -126,7 +106,7 @@ func (nh *NetHandler) sendMessages() {
 		byte_msg := []byte(msg.ToStringWithBuilder(&msg_builder))
 		nh.conn.Write(byte_msg)
 	}
-	// this should happen when the msg_out is closed
+	nh.msg_shutdown <- true
 }
 
 // creates the string that can be transmitted with network.Write()
@@ -194,7 +174,15 @@ func (self *MsgAcceptor) AcceptMessages() {
 		self.conn.SetReadDeadline(deadline)
 		bytes_read, err := self.conn.Read(buffer[:])
 
-		if err != nil || err != io.EOF {
+		if os.IsTimeout(err) {
+			continue
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				// happens when I close netcat before game
+				// so this means I have DConn/ReConn to the server
+			}
 			continue
 		}
 
@@ -210,7 +198,9 @@ func (self *MsgAcceptor) AcceptMessages() {
 			}
 
 			if results.parser_done {
+				fmt.Println("Parsed correct message, sending out")
 				self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
+				fmt.Println("Sent out")
 				parser.ResetParser()
 			}
 

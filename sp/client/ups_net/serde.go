@@ -96,30 +96,37 @@ func (p *Parser) ParseByte(char byte) ParserState {
 	switch p.phase {
 	case Magic_1:
 		if char != 'P' {
-			fmt.Println("Invalid Magic")
+			fmt.Println("Invalid Magic 1", string(char))
 			return Invalid
 		}
 		p.phase = Magic_2
 
 	case Magic_2:
 		if char != 'K' {
-			fmt.Println("Invalid Magic")
+			fmt.Println("Invalid Magic 2", string(char))
 			return Invalid
 		}
 		p.phase = Magic_3
 
 	case Magic_3:
 		if char != 'R' {
-			fmt.Println("Invalid Magic")
+			fmt.Println("Invalid Magic 3", string(char))
 			return Invalid
 		}
 		p.phase = Type
 
 	case Type:
 		if char != 'N' && char != 'P' {
-			fmt.Println("Unknown message type")
+			fmt.Println("Unknown message type", string(char))
 			return Invalid
 		}
+
+		if char == 'N' {
+			p.msg_type = NoPayloadMsg
+		} else {
+			p.msg_type = PayloadMsg
+		}
+
 		p.phase = Code
 
 	case Code:
@@ -136,8 +143,12 @@ func (p *Parser) ParseByte(char byte) ParserState {
 
 	case Size:
 		if char < '0' || char > '9' {
-			fmt.Println("Non numeric character in size")
+			fmt.Println("Non numeric character in size", string(char))
 			return Invalid
+		}
+
+		if p.size_index >= 3 {
+			p.phase = Payload
 		}
 
 		p.payload_len = p.payload_len*10 + (uint64(char) - '0')
@@ -154,6 +165,7 @@ func (p *Parser) ParseByte(char byte) ParserState {
 		if char == '\n' {
 			return Done
 		} else {
+			fmt.Println("Message was not terminated by an endline")
 			return Invalid
 		}
 	}
@@ -179,6 +191,8 @@ func (p *Parser) ParseBytes(bytes []byte) ParseResults {
 		}
 
 		state := p.ParseByte(bytes[i])
+		i++
+
 		switch state {
 		case OK:
 			continue
