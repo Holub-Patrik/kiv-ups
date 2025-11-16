@@ -15,7 +15,6 @@ const (
 	ScreenConnecting
 	ScreenRoomSelect
 	ScreenInGame
-	ScreenError
 )
 
 // Room defines the data for a single game room.

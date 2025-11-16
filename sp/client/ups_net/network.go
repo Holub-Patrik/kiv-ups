@@ -56,11 +56,15 @@ func InitNetHandler() NetHandler {
 // If it for any reason fails, it returns false
 // If it connects, it sets the networkHandler connection to the retrieved connection
 func (nh *NetHandler) Connect(host string, port string) bool {
+	fmt.Println("NetHandler: Attempting connect")
 	maybe_conn, err := net.Dial("tcp", host+":"+port)
+
 	if err != nil {
+		fmt.Println("NetHandler: Connect Failed")
 		return false
 	}
 
+	fmt.Println("NetHandler: Success")
 	nh.conn = maybe_conn
 	return true
 }

@@ -6,17 +6,29 @@ import (
 )
 
 type ButtonComponent struct {
-	bounds rl.Rectangle
-	ID     string
-	Text   string
+	bounds     rl.Rectangle
+	ID         string
+	Text       string
+	max_width  float32
+	max_height float32
 }
 
-func NewButtonComponent(id string, text string) *ButtonComponent {
-	return &ButtonComponent{ID: id, Text: text}
+func NewButtonComponent(id string, text string, max_w float32, max_h float32) *ButtonComponent {
+	return &ButtonComponent{ID: id, Text: text, max_width: max_w, max_height: max_h}
 }
 
 func (b *ButtonComponent) Calculate(bounds rl.Rectangle) {
-	b.bounds = bounds
+	temp_bounds := bounds
+
+	if bounds.Width > b.max_width {
+		temp_bounds.Width = b.max_width
+	}
+
+	if bounds.Height > b.max_height {
+		temp_bounds.Height = b.max_height
+	}
+
+	b.bounds = temp_bounds
 }
 
 func (b *ButtonComponent) Draw(eventChannel chan<- UIEvent) {

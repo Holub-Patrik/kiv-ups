@@ -27,12 +27,14 @@ func gameThread(ctx *ProgCtx) {
 				// Channel closed, network handler shut down
 				fmt.Println("NetMsgInChan closed. Shutting down GameThread.")
 				ctx.StateMutex.Lock()
-				ctx.State.Screen = ScreenError
+				ctx.State.Screen = ScreenMainMenu
+				// TODO: Add error notification
 				ctx.State.ErrorMessage = "Connection lost."
 				ctx.StateMutex.Unlock()
 				ctx.ShouldClose = true
 				break
 			}
+
 			handleNetworkMessage(ctx, msg)
 
 			// --- Handle other periodic tasks ---
@@ -53,7 +55,7 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 	switch evt := input.(type) {
 	case EvtConnectClicked:
 		fmt.Println("GameThread: Received EvtConnectClicked")
-		// Set UI state to "Connecting"
+
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenConnecting
 		ctx.State.IsConnecting = true
@@ -62,33 +64,30 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 		// Start connection in a separate goroutine so we don't block this loop
 		go func(host, port string) {
 			success := ctx.NetHandler.Connect(host, port)
+			fmt.Println("GameThread: Connect result:", success)
+
 			if !success {
 				ctx.StateMutex.Lock()
-				ctx.State.Screen = ScreenError
+				ctx.State.Screen = ScreenServerSelect
+				// here I need to implement the notification system
 				ctx.State.ErrorMessage = "Failed to connect to " + host + ":" + port
 				ctx.State.IsConnecting = false
 				ctx.StateMutex.Unlock()
 				return
 			}
 
-			// Connection successful!
-			// Plug the handler's channels into our context
-			ctx.NetMsgInChan = ctx.NetHandler.MsgIn()   // Assuming MsgIn() returns the chan
-			ctx.NetMsgOutChan = ctx.NetHandler.MsgOut() // Assuming MsgOut() returns the chan
+			ctx.NetMsgInChan = ctx.NetHandler.MsgIn()
+			ctx.NetMsgOutChan = ctx.NetHandler.MsgOut()
 
-			// Start the network S/R threads
 			go ctx.NetHandler.Run()
 
-			// Now, send the initial connect message
 			fmt.Println("GameThread: Sending CONN message")
 			ctx.NetMsgOutChan <- unet.NetMsg{Code: "CONN", Payload: ""}
 		}(evt.Host, evt.Port)
 
 	case EvtCancelConnectClicked:
-		// TODO: Handle connection cancellation
-		// This would involve closing the connection and resetting state
 		fmt.Println("GameThread: Cancelling connection...")
-		ctx.NetHandler.Close() // You'll need to implement a Close() method
+		ctx.NetHandler.Close()
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenMainMenu
 		ctx.State.IsConnecting = false
@@ -96,8 +95,6 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 
 	case EvtQuitClicked:
 		ctx.ShouldClose = true
-
-		// Add other user input events here (join room, bet, fold, etc.)
 	}
 }
 
@@ -124,7 +121,6 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 
 		// This is also the ACK for "DONE". We don't need to do anything.
 
-	// --- Scenario: Rooms ---
 	case "ROOM":
 		// Server is sending us a room.
 		room := deserializeRoom(msg.Payload) // You need to implement this!
@@ -150,7 +146,6 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 		// Send ACK
 		ctx.NetMsgOutChan <- unet.NetMsg{Code: "00OK", Payload: ""}
 
-	// --- Scenario: Showing Rooms ---
 	case "RMUP":
 		// Server is sending a room update.
 		room := deserializeRoom(msg.Payload) // You need to implement this!
@@ -163,11 +158,11 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 		ctx.StateMutex.Unlock()
 		// No ACK needed for a broadcast update (usually)
 
-	// --- Error Handling ---
 	case "ERR": // Example error code
 		ctx.StateMutex.Lock()
-		ctx.State.Screen = ScreenError
-		ctx.State.ErrorMessage = msg.Payload // Show server error to user
+		// TODO: Add Notification
+		ctx.State.Screen = ScreenMainMenu
+		// ctx.State.ErrorMessage = msg.Payload // Show server error to user
 		ctx.State.IsConnecting = false
 		ctx.StateMutex.Unlock()
 	}

@@ -51,7 +51,8 @@ func buildUI(ctx *ProgCtx) {
 	serverMenu := w.NewHStack(10)
 	serverMenu.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
 	serverMenu.AddChild(w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, &ctx.StateMutex, 6))
-	serverMenu.AddChild(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
+	confirm_btn := w.NewCenterComponent(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
+	serverMenu.AddChild(confirm_btn)
 
 	serverMenuPanel := w.NewPanelComponent(rl.Gray, serverMenu)
 
@@ -181,10 +182,8 @@ func main() {
 			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, roomSelect)
 
 		case ScreenInGame:
-		case ScreenError:
 		}
 
-		// --- Drawing ---
 		rl.BeginDrawing()
 		rl.DrawFPS(0, 0)
 		rl.ClearBackground(rl.Black)
