@@ -2,13 +2,15 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
 	unet "poker-client/ups_net"
 	w "poker-client/window"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 // --- gamethread.go is unchanged and still required ---
@@ -78,25 +80,39 @@ func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
 	roomList.AddChild(w.NewLabelComponent("Select a Room", 24, rl.White))
 
 	ctx.StateMutex.RLock()
-	// Copy to local slice to avoid holding lock
-	rooms := make([]Room, 0, len(ctx.State.Rooms))
-	for _, room := range ctx.State.Rooms {
-		rooms = append(rooms, room)
+
+	sorted_keys := make([]int, 0, len(ctx.State.Rooms))
+	for k := range ctx.State.Rooms {
+		sorted_keys = append(sorted_keys, k)
 	}
+
+	sort.Ints(sorted_keys)
+
+	rooms := make([]Room, 0, len(ctx.State.Rooms))
+	for _, id := range sorted_keys {
+		rooms = append(rooms, ctx.State.Rooms[id])
+	}
+
 	ctx.StateMutex.RUnlock()
 
 	if len(rooms) == 0 {
-		roomList.AddChild(w.NewLabelComponent("No rooms available.", 18, rl.Gray))
+		centered_label := w.NewCenterComponent(w.NewLabelComponent("No rooms available.", 18, rl.Gray))
+		roomList.AddChild(centered_label)
 	}
 
 	for _, room := range rooms {
 		roomText := fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
-		roomList.AddChild(w.NewButtonComponent("join_"+strconv.Itoa(room.ID), roomText, 150, 50))
+		centered_btn := w.NewCenterComponent(w.NewButtonComponent("join_"+strconv.Itoa(room.ID), roomText, 150, 50))
+		roomList.AddChild(centered_btn)
 	}
 
-	roomList.AddChild(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
+	back_btn := w.NewCenterComponent(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
+	roomList.AddChild(back_btn)
 
-	return roomList
+	roomListPanel := w.NewPanelComponent(rl.DarkBlue, roomList)
+	roomBoundsBox := w.NewBoundsBox(0.4, 0.6, roomListPanel)
+
+	return roomBoundsBox
 }
 
 func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
