@@ -1,14 +1,14 @@
 package main
 
 import (
-	unet "poker-client/ups_net"
-	w "poker-client/window" // Your new compose library
-
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	unet "poker-client/ups_net"
+	w "poker-client/window"
 )
 
 // --- gamethread.go is unchanged and still required ---
@@ -23,7 +23,7 @@ func initProgCtx() ProgCtx {
 
 	// Init State
 	ctx.State.Screen = ScreenMainMenu
-	ctx.State.Rooms = make(map[string]Room)
+	ctx.State.Rooms = make(map[int]Room)
 	ctx.StateMutex = sync.RWMutex{}
 	ctx.State.ServerIP = "127.0.0.1"
 	ctx.State.ServerPort = "8080"
@@ -91,7 +91,7 @@ func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
 
 	for _, room := range rooms {
 		roomText := fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
-		roomList.AddChild(w.NewButtonComponent("join_"+room.ID, roomText, 150, 50))
+		roomList.AddChild(w.NewButtonComponent("join_"+strconv.Itoa(room.ID), roomText, 150, 50))
 	}
 
 	roomList.AddChild(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	unet "poker-client/ups_net"
@@ -74,7 +73,6 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 			ctx.NetMsgInChan = ctx.NetHandler.MsgIn()
 			ctx.NetMsgOutChan = ctx.NetHandler.MsgOut()
 
-			// hmmm, this will slowly add more and more acceptor threads
 			go ctx.NetHandler.Run()
 
 			fmt.Println("GameThread: Sending CONN message")
@@ -83,7 +81,6 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 
 	case EvtCancelConnectClicked:
 		fmt.Println("GameThread: Cancelling connection...")
-		ctx.NetHandler.Close()
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenMainMenu
 		ctx.State.IsConnecting = false
@@ -102,13 +99,13 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 	currentScreen := ctx.State.Screen
 	ctx.StateMutex.RUnlock()
 
-	if currentScreen == ScreenConnecting && msg.Code != "00OK" {
+	/* if currentScreen == ScreenConnecting && msg.Code != "00OK" {
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenMainMenu
 		ctx.Popup.AddPopup("Unexpected Response during connection", time.Second*3)
 		ctx.State.IsConnecting = false
 		ctx.StateMutex.Unlock()
-	}
+	} */
 
 	switch msg.Code {
 	case "00OK":
@@ -118,11 +115,11 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 		}
 
 	case "ROOM":
-		room := deserializeRoom(msg.Payload) // You need to implement this!
+		room := deserializeRoom(msg.Payload)
 		fmt.Printf("GameThread: Received Room: ID=%s, Name=%s\n", room.ID, room.Name)
 		ctx.StateMutex.Lock()
 		if ctx.State.Rooms == nil {
-			ctx.State.Rooms = make(map[string]Room)
+			ctx.State.Rooms = make(map[int]Room)
 		}
 		ctx.State.Rooms[room.ID] = room
 		ctx.StateMutex.Unlock()
@@ -141,8 +138,7 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 		ctx.NetMsgOutChan <- unet.NetMsg{Code: "00OK", Payload: ""}
 
 	case "RMUP":
-		// Server is sending a room update.
-		room := deserializeRoom(msg.Payload) // You need to implement this!
+		room := deserializeRoom(msg.Payload)
 		fmt.Printf("GameThread: Received Room Update: ID=%s\n", room.ID)
 		ctx.StateMutex.Lock()
 		// Just replace the existing room data
@@ -150,7 +146,7 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 			ctx.State.Rooms[room.ID] = room
 		}
 		ctx.StateMutex.Unlock()
-		// No ACK needed for a broadcast update (usually)
+		// No ACK needed for a broadcast update
 
 	case "ERR": // Example error code
 		ctx.StateMutex.Lock()
@@ -161,20 +157,47 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 	}
 }
 
-// deserializeRoom is a placeholder. You must implement this
-// to parse your [RoomData] payload.
 func deserializeRoom(payload string) Room {
-	// Example: Payload is "ID001;Poker Room 1;4;8"
-	parts := strings.Split(payload, ";")
-	if len(parts) >= 4 {
-		// Add error handling for Atoi, etc.
-		return Room{
-			ID:             parts[0],
-			Name:           parts[1],
-			CurrentPlayers: 4, //_ = parts[2]
-			MaxPlayers:     8, //_ = parts[3]
-		}
+	err_room := Room{ID: -1, Name: "Invalid Room Data"}
+	valid_room := Room{}
+
+	offset := 0
+	byte_payload := []byte(payload[offset:])
+
+	id, ok := unet.ReadBigInt(byte_payload)
+
+	if !ok {
+		return err_room
+	} else {
+		valid_room.ID = id
 	}
-	// Return an empty/error room
-	return Room{ID: "ERR", Name: "Invalid Room Data"}
+
+	offset += 4
+	name, ok := unet.ReadString(byte_payload[offset:])
+
+	if !ok {
+		return err_room
+	} else {
+		valid_room.Name = name
+	}
+
+	offset += 4 + len(name)
+	curr_players, ok := unet.ReadSmallInt(byte_payload[offset:])
+
+	if !ok {
+		return err_room
+	} else {
+		valid_room.CurrentPlayers = curr_players
+	}
+
+	offset += 2
+	max_players, ok := unet.ReadSmallInt(byte_payload[offset:])
+
+	if !ok {
+		return err_room
+	} else {
+		valid_room.MaxPlayers = max_players
+	}
+
+	return valid_room
 }

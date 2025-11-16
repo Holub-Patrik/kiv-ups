@@ -71,6 +71,8 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 }
 
 func (nh *NetHandler) Close() {
+	nh.msg_shutdown <- true
+
 	close(nh.msg_out)
 	close(nh.msg_in)
 	close(nh.msg_shutdown)
@@ -101,12 +103,17 @@ func (nh *NetHandler) Run() {
 }
 
 func (nh *NetHandler) sendMessages() {
+	fmt.Println("Sender Thread Starting ... ")
+
 	msg_builder := strings.Builder{}
 	for msg := range nh.msg_out {
 		byte_msg := []byte(msg.ToStringWithBuilder(&msg_builder))
 		nh.conn.Write(byte_msg)
 	}
-	nh.msg_shutdown <- true
+
+	nh.msg_shutdown <- true // signal shutdown for the rest of the NetHandler
+
+	fmt.Println("Sender Thread Ending")
 }
 
 // creates the string that can be transmitted with network.Write()
@@ -169,6 +176,16 @@ func (self *MsgAcceptor) AcceptMessages() {
 	stop := false
 
 	for !stop {
+		select {
+		case shutdown := <-self.shutdown:
+			if shutdown {
+				stop = true
+				continue
+			}
+
+		default:
+		}
+
 		// waits for 20 milliseconds if anything is received
 		deadline := time.Now().Add(time.Millisecond * 20)
 		self.conn.SetReadDeadline(deadline)
@@ -211,6 +228,5 @@ func (self *MsgAcceptor) AcceptMessages() {
 		}
 	}
 
-	self.shutdown <- true
 	fmt.Println("Accepter Thread Ending")
 }

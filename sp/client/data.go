@@ -17,15 +17,15 @@ const (
 )
 
 type Room struct {
-	ID             string
+	ID             int
 	Name           string
-	CurrentPlayers int
-	MaxPlayers     int
+	CurrentPlayers int // small int (2B)
+	MaxPlayers     int // small int (2B)
 }
 
 type GameState struct {
 	Screen       UIScreen
-	Rooms        map[string]Room
+	Rooms        map[int]Room
 	IsConnecting bool
 
 	ServerIP   string

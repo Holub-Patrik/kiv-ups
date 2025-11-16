@@ -214,3 +214,60 @@ func (p *Parser) ParseBytes(bytes []byte) ParseResults {
 	res.bytes_parsed = i
 	return res
 }
+
+func ReadSmallInt(slice []byte) (int, bool) {
+	fmt.Println("RSI: Reading:", string(slice))
+	if len(slice) < 2 {
+		return 0, false
+	}
+
+	var number int = 0
+	for i := range 2 {
+		char := slice[i]
+		if char < '0' || char > '9' {
+			fmt.Println("Non numeric:", string(char))
+			return 0, false
+		}
+
+		number = number*10 + int(char-'0')
+	}
+
+	return number, true
+}
+
+func ReadBigInt(slice []byte) (int, bool) {
+	fmt.Println("RBI: Reading:", string(slice))
+	if len(slice) < 4 {
+		return 0, false
+	}
+
+	var number int = 0
+	for i := range 4 {
+		char := slice[i]
+		if char < '0' || char > '9' {
+			fmt.Println("Non numeric:", string(char))
+			return 0, false
+		}
+
+		number = number*10 + int(char-'0')
+	}
+
+	return number, true
+}
+
+func ReadString(slice []byte) (string, bool) {
+	fmt.Println("RS: Reading: ", string(slice))
+	stringLength, ok := ReadBigInt(slice)
+
+	if !ok {
+		return "", false
+	}
+
+	stringSlice := slice[4 : 4+stringLength]
+	fmt.Println("RS: Reading string part: ", string(stringSlice))
+	if len(stringSlice) != stringLength {
+		return "", false
+	}
+
+	return string(stringSlice), true
+}
