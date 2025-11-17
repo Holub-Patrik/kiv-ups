@@ -34,18 +34,20 @@ type GameState struct {
 
 type UserInputEvent any
 
-type EvtConnectClicked struct {
+type EvtConnect struct {
 	Host string
 	Port string
 }
 
-type EvtCancelConnectClicked struct{}
+type EvtCancelConnect struct{}
 
-type EvtRoomJoinClicked struct {
+type EvtRoomJoin struct {
 	RoomID string
 }
 
-type EvtQuitClicked struct{}
+type EvtQuit struct{}
+
+type EvtBackToMain struct{}
 
 type UIStore struct {
 	MainMenu     w.RGComponent

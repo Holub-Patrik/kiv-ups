@@ -16,7 +16,7 @@ import (
 // --- gamethread.go is unchanged and still required ---
 
 // initProgCtx sets up the entire application context.
-func initProgCtx() ProgCtx {
+func initProgCtx() *ProgCtx {
 	ctx := ProgCtx{}
 
 	// Init Channels
@@ -31,13 +31,13 @@ func initProgCtx() ProgCtx {
 	ctx.State.ServerPort = "8080"
 
 	// Init Network
-	ctx.NetHandler = unet.NewNetHandler()
+	ctx.NetHandler = *unet.NewNetHandler()
 	ctx.Popup = *NewPopupManager()
 
 	// Init UI
 	buildUI(&ctx)
 
-	return ctx
+	return &ctx
 }
 
 func buildUI(ctx *ProgCtx) {
@@ -123,7 +123,7 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 		ctx.StateMutex.Unlock()
 
 	case "MainMenu_CloseBtn":
-		ctx.UserInputChan <- EvtQuitClicked{}
+		ctx.UserInputChan <- EvtQuit{}
 
 	case "Server_ConfirmBtn":
 		// Get the IP/Port safely from the state
@@ -131,13 +131,13 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 		host := ctx.State.ServerIP
 		port := ctx.State.ServerPort
 		ctx.StateMutex.RUnlock()
-		ctx.UserInputChan <- EvtConnectClicked{Host: host, Port: port}
+		ctx.UserInputChan <- EvtConnect{Host: host, Port: port}
 
 	case "Connecting_CancelBtn":
-		ctx.UserInputChan <- EvtCancelConnectClicked{}
+		ctx.UserInputChan <- EvtCancelConnect{}
 
 	case "RoomSelect_BackBtn":
-		// TODO: Tell game thread to disconnect or go back
+		ctx.UserInputChan <- EvtBackToMain{}
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenMainMenu
 		ctx.StateMutex.Unlock()
@@ -145,7 +145,7 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	default:
 		after, found := strings.CutPrefix(event.SourceID, "join_")
 		if found {
-			ctx.UserInputChan <- EvtRoomJoinClicked{RoomID: after}
+			ctx.UserInputChan <- EvtRoomJoin{RoomID: after}
 		}
 	}
 }
@@ -163,7 +163,7 @@ func main() {
 
 	rl.SetTargetFPS(60)
 
-	ctx := initProgCtx()
+	ctx := *initProgCtx()
 
 	// Start the "Game Thread"
 	go gameThread(&ctx)
@@ -262,7 +262,7 @@ func main() {
 
 	// --- Shutdown ---
 	ctx.ShouldClose = true
-	ctx.UserInputChan <- EvtQuitClicked{} // Wake up game thread
+	ctx.UserInputChan <- EvtQuit{} // Wake up game thread
 
 	fmt.Println("Main: Waiting for GameThread to shut down...")
 	<-ctx.DoneChan

@@ -34,34 +34,35 @@ func (p *TimedPopup) Update() bool {
 	return isAlive
 }
 
-// Calculate positions the popup in the center of the screen.
 func (p *TimedPopup) Calculate(screenBounds rl.Rectangle) {
 	const widthRatio float32 = 0.4   // 40% of screen width
 	const heightRatio float32 = 0.15 // 15% of screen height
 
-	const maxHeight float32 = 50
-	const maxWidth float32 = 150
+	textSize := rl.MeasureTextEx(rl.GetFontDefault(), p.text, 20, 1)
 
-	p.bounds.Width = screenBounds.Width * widthRatio
-	p.bounds.Height = screenBounds.Height * heightRatio
-
-	if p.bounds.Width > maxWidth {
-		p.bounds.Width = maxWidth
-	}
-
-	if p.bounds.Height > maxHeight {
-		p.bounds.Height = maxHeight
-	}
+	p.bounds.Width = textSize.X
+	p.bounds.Height = textSize.Y
 
 	p.bounds.X = screenBounds.X
 	p.bounds.Y = screenBounds.Y
+
 }
 
 func (p *TimedPopup) Draw(eventChannel chan<- UIEvent) {
 	rl.DrawRectangleRec(p.bounds, p.color)
 	rl.DrawRectangleLinesEx(p.bounds, 3, rl.White)
 
-	rl.DrawText(p.text, int32(p.bounds.X+20), int32(p.bounds.Y+20), 20, rl.White)
+	rl.DrawTextEx(
+		rl.GetFontDefault(),
+		p.text,
+		rl.Vector2{
+			X: p.bounds.X,
+			Y: p.bounds.Y,
+		},
+		20,
+		1,
+		rl.White,
+	)
 }
 
 func (p *TimedPopup) GetBounds() rl.Rectangle {

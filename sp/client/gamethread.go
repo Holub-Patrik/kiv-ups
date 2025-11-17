@@ -19,13 +19,18 @@ func gameThread(ctx *ProgCtx) {
 
 		case msg, ok := <-ctx.NetMsgInChan:
 			if !ok {
-				// Channel closed, network handler shut down
 				fmt.Println("NetMsgInChan closed. Shutting down GameThread.")
-				ctx.StateMutex.Lock()
-				ctx.State.Screen = ScreenMainMenu
-				ctx.Popup.AddPopup("Connection lost.", time.Second*3)
-				ctx.StateMutex.Unlock()
-				ctx.ShouldClose = true
+				// Channel closed, network handler shut down
+				if !ctx.ShouldClose {
+					ctx.StateMutex.Lock()
+					ctx.State.Screen = ScreenMainMenu
+					ctx.Popup.AddPopup("Connection lost.", time.Second*3)
+					ctx.State.IsConnecting = false
+					ctx.StateMutex.Unlock()
+				}
+
+				ctx.NetMsgInChan = nil
+				ctx.NetMsgOutChan = nil
 				break
 			}
 			fmt.Println("GamneThread: Got message")
@@ -42,30 +47,48 @@ func gameThread(ctx *ProgCtx) {
 	}
 
 	fmt.Println("GameThread shutting down.")
+
+	if ctx.NetHandler.MsgOut() != nil {
+		fmt.Println("GameThread: Telling NetHandler to shut down...")
+		ctx.NetHandler.Shutdown()
+	}
+
 	ctx.DoneChan <- true // Signal main() that we are done
 }
 
-// handleUserInput processes events from the Render Thread
 func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 	switch evt := input.(type) {
-	case EvtConnectClicked:
+	case EvtConnect:
 		fmt.Println("GameThread: Received EvtConnectClicked")
 
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenConnecting
 		ctx.State.IsConnecting = true
+		ctx.NetHandler = *unet.NewNetHandler()
 		ctx.StateMutex.Unlock()
 
 		go func(host, port string) {
 			success := ctx.NetHandler.Connect(host, port)
 			fmt.Println("GameThread: Connect result:", success)
 
+			ctx.StateMutex.RLock()
+			isStillConnecting := ctx.State.IsConnecting
+			ctx.StateMutex.RUnlock()
+
+			if !isStillConnecting {
+				fmt.Println("GameThread: Connection cancelled by user.")
+				if success {
+					ctx.NetHandler.Shutdown()
+				}
+				return
+			}
+
 			if !success {
 				ctx.StateMutex.Lock()
 				ctx.State.Screen = ScreenServerSelect
-				// here I need to implement the notification system
 				ctx.Popup.AddPopup("Failed to connect to "+host+":"+port, time.Second*3)
 				ctx.State.IsConnecting = false
+				ctx.NetHandler.Shutdown()
 				ctx.StateMutex.Unlock()
 				return
 			}
@@ -79,14 +102,22 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 			ctx.NetMsgOutChan <- unet.NetMsg{Code: "CONN", Payload: ""}
 		}(evt.Host, evt.Port)
 
-	case EvtCancelConnectClicked:
+	case EvtCancelConnect:
 		fmt.Println("GameThread: Cancelling connection...")
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenMainMenu
+		ctx.NetHandler.Shutdown()
 		ctx.State.IsConnecting = false
 		ctx.StateMutex.Unlock()
 
-	case EvtQuitClicked:
+	case EvtBackToMain:
+		ctx.StateMutex.Lock()
+		ctx.State.Screen = ScreenMainMenu
+		ctx.NetHandler.Shutdown()
+		ctx.State.IsConnecting = false
+		ctx.StateMutex.Unlock()
+
+	case EvtQuit:
 		ctx.ShouldClose = true
 	}
 }
@@ -153,6 +184,7 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 		ctx.State.Screen = ScreenMainMenu
 		ctx.Popup.AddPopup(msg.Payload, time.Second*3)
 		ctx.State.IsConnecting = false
+		ctx.NetHandler.Shutdown()
 		ctx.StateMutex.Unlock()
 	}
 }

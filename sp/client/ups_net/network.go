@@ -2,10 +2,10 @@ package ups_net
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,31 +26,31 @@ type NetMsg struct {
 // opening/closing socket
 // This has to be included within the Game Thread so it can ask for messages from the network thread
 type NetHandler struct {
-	conn         net.Conn
-	msg_in       chan NetMsg
-	msg_out      chan NetMsg
-	msg_shutdown chan bool
+	conn   net.Conn
+	msgIn  chan NetMsg
+	msgOut chan NetMsg
+
+	wg           sync.WaitGroup
+	shutdownOnce sync.Once
 }
 
 // receiving messages from client
 type MsgAcceptor struct {
 	conn     net.Conn
 	msg_chan chan NetMsg
-	shutdown chan bool
+	nh       *NetHandler
 }
 
-func NewNetHandler() NetHandler {
+func NewNetHandler() *NetHandler {
 	msg_in := make(chan NetMsg, chanBufSize)
 	msg_out := make(chan NetMsg, chanBufSize)
-	shutdown_in := make(chan bool)
 
 	netHandler := NetHandler{
-		msg_in:       msg_in,
-		msg_out:      msg_out,
-		msg_shutdown: shutdown_in,
+		msgIn:  msg_in,
+		msgOut: msg_out,
 	}
 
-	return netHandler
+	return &netHandler
 }
 
 // Attempts to connect to the given IP
@@ -70,48 +70,61 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 	return true
 }
 
-func (nh *NetHandler) Close() {
-	nh.msg_shutdown <- true
+func (nh *NetHandler) shutdownFunc() {
+	fmt.Println("NetHandler: Shutting down...")
 
-	close(nh.msg_out)
-	close(nh.msg_in)
-	close(nh.msg_shutdown)
+	close(nh.msgOut)
+
+	if nh.conn != nil {
+		nh.conn.Close()
+	}
+}
+
+func (nh *NetHandler) Shutdown() {
+	nh.shutdownOnce.Do(nh.shutdownFunc)
 }
 
 func (nh *NetHandler) MsgIn() chan NetMsg {
-	return nh.msg_in
+	return nh.msgIn
 }
 
 func (nh *NetHandler) MsgOut() chan NetMsg {
-	return nh.msg_out
+	return nh.msgOut
 }
 
 func (nh *NetHandler) Run() {
+	nh.wg.Add(2)
+
 	// startups the 2 actual compute threads
 	go nh.sendMessages() // startup sending messages
+
 	acceptor := MsgAcceptor{
 		conn:     nh.conn,
-		msg_chan: nh.msg_in,
-		shutdown: nh.msg_shutdown,
+		msg_chan: nh.msgIn,
 	}
 	go acceptor.AcceptMessages() // startup receiving messages
 
-	// waits until the messages stop coming or error happens
-	_ = <-nh.msg_shutdown
+	nh.wg.Wait()
 
-	nh.Close()
+	close(nh.msgIn)
 }
 
 func (nh *NetHandler) sendMessages() {
+	defer nh.wg.Done()
 	fmt.Println("Sender Thread Starting ... ")
 
 	msg_builder := strings.Builder{}
-	for msg := range nh.msg_out {
+	for msg := range nh.msgOut {
 		byte_msg := []byte(msg.ToStringWithBuilder(&msg_builder))
-		nh.conn.Write(byte_msg)
-	}
+		_, err := nh.conn.Write(byte_msg)
 
-	nh.msg_shutdown <- true // signal shutdown for the rest of the NetHandler
+		if err != nil {
+			// write error, means socket was closed
+			fmt.Println("Sender Thread: Write error:", err)
+			nh.Shutdown()
+			return
+		}
+	}
 
 	fmt.Println("Sender Thread Ending")
 }
@@ -173,34 +186,20 @@ func (self *MsgAcceptor) AcceptMessages() {
 	parser := Parser{}
 	parser.Init()
 
-	stop := false
-
-	for !stop {
-		select {
-		case shutdown := <-self.shutdown:
-			if shutdown {
-				stop = true
-				continue
-			}
-
-		default:
-		}
-
+	for {
 		// waits for 20 milliseconds if anything is received
 		deadline := time.Now().Add(time.Millisecond * 20)
 		self.conn.SetReadDeadline(deadline)
 		bytes_read, err := self.conn.Read(buffer[:])
 
-		if os.IsTimeout(err) {
-			continue
-		}
-
 		if err != nil {
-			if err == io.EOF {
-				// happens when I close netcat before game
-				// so this means I have DConn/ReConn to the server
+			if os.IsTimeout(err) {
+				continue
 			}
-			continue
+
+			fmt.Println("Accepter Thread: Read error:", err)
+			self.nh.Shutdown()
+			return
 		}
 
 		var total_parsed_bytes uint64 = 0
@@ -210,8 +209,9 @@ func (self *MsgAcceptor) AcceptMessages() {
 			results = parser.ParseBytes(buffer[:bytes_read])
 
 			if results.error_occured {
-				stop = true
-				break
+				fmt.Println("Accepter Thread: Client sent goobledegook")
+				self.nh.Shutdown()
+				return
 			}
 
 			if results.parser_done {
@@ -227,6 +227,4 @@ func (self *MsgAcceptor) AcceptMessages() {
 			}
 		}
 	}
-
-	fmt.Println("Accepter Thread Ending")
 }
