@@ -9,7 +9,13 @@
  * The conditions need to be met, since the implementation expects that:
  * - only the writer can advance the write position
  * - only the reader can advance the read position
+ *
+ * Similar concept applies to the Server and Client. That is just a wrapper
+ * so instead of creating 2 Buffers, 2 Writers and 2 Readers, instead you can
+ * just TwinBuffer, Client and Server to achieve the same
  */
+
+#pragma once
 
 #include <array>
 #include <chrono>
@@ -91,6 +97,29 @@ public:
     _buffer._data[_buffer._write_pos] = item;
     _buffer.advance_write();
   }
+};
+
+template <typename Type, std::size_t Size> struct TwinBuffer {
+  Buffer<Type, Size> buffer_one{};
+  Buffer<Type, Size> buffer_two{};
+};
+
+template <typename Type, std::size_t Size> class Server final {
+public:
+  Reader<Type, Size> reader;
+  Writer<Type, Size> writer;
+
+  Server<Type, Size>(TwinBuffer<Type, Size>& twin_buf)
+      : reader(twin_buf.buffer_one), writer(twin_buf.buffer_two) {}
+};
+
+template <typename Type, std::size_t Size> class Client final {
+public:
+  Reader<Type, Size> reader;
+  Writer<Type, Size> writer;
+
+  Client<Type, Size>(TwinBuffer<Type, Size>& twin_buf)
+      : reader(twin_buf.buffer_two), writer(twin_buf.buffer_one) {}
 };
 
 } // namespace CB
