@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -13,106 +11,24 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// --- gamethread.go is unchanged and still required ---
-
-// initProgCtx sets up the entire application context.
 func initProgCtx() *ProgCtx {
 	ctx := ProgCtx{}
 
-	// Init Channels
 	ctx.UserInputChan = make(chan UserInputEvent, 10) // Buffered
 	ctx.DoneChan = make(chan bool)
 
-	// Init State
 	ctx.State.Screen = ScreenMainMenu
 	ctx.State.Rooms = make(map[int]Room)
 	ctx.StateMutex = sync.RWMutex{}
 	ctx.State.ServerIP = "127.0.0.1"
 	ctx.State.ServerPort = "8080"
 
-	// Init Network
 	ctx.NetHandler = unet.NetHandler{}
-	ctx.Popup = *NewPopupManager()
+	ctx.Popup = NewPopupManager()
 
-	// Init UI
 	buildUI(&ctx)
 
 	return &ctx
-}
-
-func buildUI(ctx *ProgCtx) {
-	mainMenu := w.NewVStack(10)
-	connect_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect", 150, 50))
-	close_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_CloseBtn", "Close", 150, 50))
-	mainMenu.AddChild(connect_btn)
-	mainMenu.AddChild(close_btn)
-
-	mainMenuPanel := w.NewPanelComponent(rl.DarkGray, mainMenu)
-	mainMenuBounds := w.NewBoundsBox(0.6, 0.8, mainMenuPanel)
-
-	ctx.UI.MainMenu = mainMenuBounds
-
-	serverMenu := w.NewHStack(10)
-	serverMenu.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
-	serverMenu.AddChild(w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, &ctx.StateMutex, 6))
-	confirm_btn := w.NewCenterComponent(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
-	serverMenu.AddChild(confirm_btn)
-
-	serverMenuPanel := w.NewPanelComponent(rl.Gray, serverMenu)
-	serverMenuBounds := w.NewBoundsBox(0.9, 0.9, serverMenuPanel)
-
-	ctx.UI.ServerSelect = serverMenuBounds
-
-	connecting := w.NewVStack(10)
-	label := w.NewCenterComponent(w.NewLabelComponent("Connecting...", 20, rl.White))
-	cancel_btn := w.NewCenterComponent(w.NewButtonComponent("Connecting_CancelBtn", "Cancel", 150, 50))
-	connecting.AddChild(label)
-	connecting.AddChild(cancel_btn)
-
-	connectingPanel := w.NewPanelComponent(rl.Gray, connecting)
-	connectingBounds := w.NewBoundsBox(0.4, 0.4, connectingPanel)
-
-	ctx.UI.Connecting = connectingBounds
-}
-
-func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
-	roomList := w.NewVStack(5)
-	roomList.AddChild(w.NewLabelComponent("Select a Room", 24, rl.White))
-
-	ctx.StateMutex.RLock()
-
-	sorted_keys := make([]int, 0, len(ctx.State.Rooms))
-	for k := range ctx.State.Rooms {
-		sorted_keys = append(sorted_keys, k)
-	}
-
-	sort.Ints(sorted_keys)
-
-	rooms := make([]Room, 0, len(ctx.State.Rooms))
-	for _, id := range sorted_keys {
-		rooms = append(rooms, ctx.State.Rooms[id])
-	}
-
-	ctx.StateMutex.RUnlock()
-
-	if len(rooms) == 0 {
-		centered_label := w.NewCenterComponent(w.NewLabelComponent("No rooms available.", 18, rl.Gray))
-		roomList.AddChild(centered_label)
-	}
-
-	for _, room := range rooms {
-		roomText := fmt.Sprintf("%s (%d/%d)", room.Name, room.CurrentPlayers, room.MaxPlayers)
-		centered_btn := w.NewCenterComponent(w.NewButtonComponent("join_"+strconv.Itoa(room.ID), roomText, 150, 50))
-		roomList.AddChild(centered_btn)
-	}
-
-	back_btn := w.NewCenterComponent(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
-	roomList.AddChild(back_btn)
-
-	roomListPanel := w.NewPanelComponent(rl.DarkBlue, roomList)
-	roomBoundsBox := w.NewBoundsBox(0.4, 0.6, roomListPanel)
-
-	return roomBoundsBox
 }
 
 func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
@@ -168,7 +84,7 @@ func main() {
 	// Start the "Game Thread"
 	go gameThread(&ctx)
 
-	componentsToDraw := make([]w.RGComponent, 0)
+	elementsToDraw := make([]UIElement, 0)
 
 	// meant for calculation/recalculation
 	screenBounds := rl.Rectangle{
@@ -177,23 +93,18 @@ func main() {
 		Height: float32(screenHeight),
 	}
 
-	ctx.UI.MainMenu.Calculate(screenBounds)
-	ctx.UI.ServerSelect.Calculate(screenBounds)
-	ctx.UI.Connecting.Calculate(screenBounds)
-
 	for !rl.WindowShouldClose() && !ctx.ShouldClose {
-		recalculate := false
 		tmpScreenHeight := int32(rl.GetScreenHeight())
 		tmpScreenWidth := int32(rl.GetScreenWidth())
 
 		if tmpScreenHeight != screenHeight {
 			screenBounds.Height = float32(tmpScreenHeight)
-			recalculate = true
+			ctx.UI.SetDirty()
 		}
 
 		if tmpScreenWidth != screenWidth {
 			screenBounds.Width = float32(tmpScreenWidth)
-			recalculate = true
+			ctx.UI.SetDirty()
 		}
 
 		// Get the current screen safely
@@ -203,30 +114,17 @@ func main() {
 
 		switch currentScreen {
 		case ScreenMainMenu:
-			if recalculate {
-				ctx.UI.MainMenu.Calculate(screenBounds)
-			}
-			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu)
+			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu)
 
 		case ScreenServerSelect:
-			if recalculate {
-				ctx.UI.MainMenu.Calculate(screenBounds)
-				ctx.UI.ServerSelect.Calculate(ctx.UI.MainMenu.GetBounds())
-			}
-			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, ctx.UI.ServerSelect)
+			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.ServerSelect)
 
 		case ScreenConnecting:
-			if recalculate {
-				ctx.UI.MainMenu.Calculate(screenBounds)
-				ctx.UI.Connecting.Calculate(ctx.UI.MainMenu.GetBounds())
-			}
-			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
+			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
 
 		case ScreenRoomSelect:
-			roomSelect := buildRoomSelectUI(&ctx)
-			// this needs to be calculated every time
-			roomSelect.Calculate(screenBounds)
-			componentsToDraw = append(componentsToDraw, ctx.UI.MainMenu, roomSelect)
+			roomSelect := UIElement{dirty: true, component: buildRoomSelectUI(&ctx)}
+			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, roomSelect)
 
 		case ScreenInGame:
 		}
@@ -242,15 +140,20 @@ func main() {
 
 		uiEventChannel := make(chan w.UIEvent, 10)
 
-		for _, component := range componentsToDraw {
-			component.Draw(uiEventChannel)
+		for _, element := range elementsToDraw {
+			if element.dirty {
+				element.component.Calculate(screenBounds)
+				element.dirty = false
+			}
+
+			element.component.Draw(uiEventChannel)
 		}
 
 		// Draw popups
 		ctx.Popup.Draw(uiEventChannel)
 		ctx.Popup.Update()
 
-		componentsToDraw = componentsToDraw[:0]
+		elementsToDraw = elementsToDraw[:0]
 
 		rl.EndDrawing()
 

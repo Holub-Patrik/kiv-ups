@@ -11,8 +11,8 @@ type PopupManager struct {
 	activePopups []w.PopupComponent
 }
 
-func NewPopupManager() *PopupManager {
-	return &PopupManager{
+func NewPopupManager() PopupManager {
+	return PopupManager{
 		activePopups: make([]w.PopupComponent, 0),
 	}
 }

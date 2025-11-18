@@ -12,6 +12,7 @@ const (
 	ScreenMainMenu UIScreen = iota
 	ScreenServerSelect
 	ScreenConnecting
+	ScreenWaitingForRooms
 	ScreenRoomSelect
 	ScreenInGame
 )
@@ -49,10 +50,21 @@ type EvtQuit struct{}
 
 type EvtBackToMain struct{}
 
+type UIElement struct {
+	dirty     bool
+	component w.RGComponent
+}
+
 type UIStore struct {
-	MainMenu     w.RGComponent
-	ServerSelect w.RGComponent
-	Connecting   w.RGComponent
+	MainMenu     UIElement
+	ServerSelect UIElement
+	Connecting   UIElement
+}
+
+func (store *UIStore) SetDirty() {
+	store.MainMenu.dirty = true
+	store.ServerSelect.dirty = true
+	store.Connecting.dirty = true
 }
 
 type ProgCtx struct {
