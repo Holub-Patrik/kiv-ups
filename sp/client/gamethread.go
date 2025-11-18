@@ -19,8 +19,6 @@ func gameThread(ctx *ProgCtx) {
 
 		case msg, ok := <-ctx.NetMsgInChan:
 			if !ok {
-				fmt.Println("NetMsgInChan closed. Shutting down GameThread.")
-				// Channel closed, network handler shut down
 				if !ctx.ShouldClose {
 					ctx.StateMutex.Lock()
 					ctx.State.Screen = ScreenMainMenu
@@ -48,10 +46,8 @@ func gameThread(ctx *ProgCtx) {
 
 	fmt.Println("GameThread shutting down.")
 
-	if ctx.NetHandler.MsgOut() != nil {
-		fmt.Println("GameThread: Telling NetHandler to shut down...")
-		ctx.NetHandler.Shutdown()
-	}
+	fmt.Println("GameThread: Telling NetHandler to shut down...")
+	ctx.NetHandler.Disconnect()
 
 	ctx.DoneChan <- true // Signal main() that we are done
 }
@@ -64,7 +60,6 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenConnecting
 		ctx.State.IsConnecting = true
-		ctx.NetHandler = *unet.NewNetHandler()
 		ctx.StateMutex.Unlock()
 
 		go func(host, port string) {
@@ -78,7 +73,7 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 			if !isStillConnecting {
 				fmt.Println("GameThread: Connection cancelled by user.")
 				if success {
-					ctx.NetHandler.Shutdown()
+					ctx.NetHandler.Disconnect()
 				}
 				return
 			}
@@ -88,15 +83,12 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 				ctx.State.Screen = ScreenServerSelect
 				ctx.Popup.AddPopup("Failed to connect to "+host+":"+port, time.Second*3)
 				ctx.State.IsConnecting = false
-				ctx.NetHandler.Shutdown()
 				ctx.StateMutex.Unlock()
 				return
 			}
 
 			ctx.NetMsgInChan = ctx.NetHandler.MsgIn()
 			ctx.NetMsgOutChan = ctx.NetHandler.MsgOut()
-
-			go ctx.NetHandler.Run()
 
 			fmt.Println("GameThread: Sending CONN message")
 			ctx.NetMsgOutChan <- unet.NetMsg{Code: "CONN", Payload: ""}
@@ -106,14 +98,14 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 		fmt.Println("GameThread: Cancelling connection...")
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenMainMenu
-		ctx.NetHandler.Shutdown()
+		ctx.NetHandler.Disconnect()
 		ctx.State.IsConnecting = false
 		ctx.StateMutex.Unlock()
 
 	case EvtBackToMain:
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenMainMenu
-		ctx.NetHandler.Shutdown()
+		ctx.NetHandler.Disconnect()
 		ctx.State.IsConnecting = false
 		ctx.StateMutex.Unlock()
 
@@ -130,14 +122,6 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 	currentScreen := ctx.State.Screen
 	ctx.StateMutex.RUnlock()
 
-	/* if currentScreen == ScreenConnecting && msg.Code != "00OK" {
-		ctx.StateMutex.Lock()
-		ctx.State.Screen = ScreenMainMenu
-		ctx.Popup.AddPopup("Unexpected Response during connection", time.Second*3)
-		ctx.State.IsConnecting = false
-		ctx.StateMutex.Unlock()
-	} */
-
 	switch msg.Code {
 	case "00OK":
 		if currentScreen == ScreenConnecting {
@@ -147,7 +131,7 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 
 	case "ROOM":
 		room := deserializeRoom(msg.Payload)
-		fmt.Printf("GameThread: Received Room: ID=%s, Name=%s\n", room.ID, room.Name)
+		fmt.Printf("GameThread: Received Room: ID=%d, Name=%s\n", room.ID, room.Name)
 		ctx.StateMutex.Lock()
 		if ctx.State.Rooms == nil {
 			ctx.State.Rooms = make(map[int]Room)
@@ -170,7 +154,7 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 
 	case "RMUP":
 		room := deserializeRoom(msg.Payload)
-		fmt.Printf("GameThread: Received Room Update: ID=%s\n", room.ID)
+		fmt.Printf("GameThread: Received Room Update: ID=%d\n", room.ID)
 		ctx.StateMutex.Lock()
 		// Just replace the existing room data
 		if ctx.State.Rooms != nil {
@@ -184,7 +168,7 @@ func handleNetworkMessage(ctx *ProgCtx, msg unet.NetMsg) {
 		ctx.State.Screen = ScreenMainMenu
 		ctx.Popup.AddPopup(msg.Payload, time.Second*3)
 		ctx.State.IsConnecting = false
-		ctx.NetHandler.Shutdown()
+		ctx.NetHandler.Disconnect()
 		ctx.StateMutex.Unlock()
 	}
 }

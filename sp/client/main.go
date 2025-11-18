@@ -31,7 +31,7 @@ func initProgCtx() *ProgCtx {
 	ctx.State.ServerPort = "8080"
 
 	// Init Network
-	ctx.NetHandler = *unet.NewNetHandler()
+	ctx.NetHandler = unet.NetHandler{}
 	ctx.Popup = *NewPopupManager()
 
 	// Init UI

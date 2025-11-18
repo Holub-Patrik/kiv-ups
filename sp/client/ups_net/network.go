@@ -30,8 +30,7 @@ type NetHandler struct {
 	msgIn  chan NetMsg
 	msgOut chan NetMsg
 
-	wg           sync.WaitGroup
-	shutdownOnce sync.Once
+	wg sync.WaitGroup
 }
 
 // receiving messages from client
@@ -41,47 +40,63 @@ type MsgAcceptor struct {
 	nh       *NetHandler
 }
 
-func NewNetHandler() *NetHandler {
-	msg_in := make(chan NetMsg, chanBufSize)
-	msg_out := make(chan NetMsg, chanBufSize)
-
-	netHandler := NetHandler{
-		msgIn:  msg_in,
-		msgOut: msg_out,
-	}
-
-	return &netHandler
-}
-
 // Attempts to connect to the given IP
 // If it for any reason fails, it returns false
 // If it connects, it sets the networkHandler connection to the retrieved connection
 func (nh *NetHandler) Connect(host string, port string) bool {
+	if nh.conn != nil {
+		return false
+	}
+
 	fmt.Println("NetHandler: Attempting connect")
 	maybe_conn, err := net.Dial("tcp", host+":"+port)
 
 	if err != nil {
-		fmt.Println("NetHandler: Connect Failed")
+		fmt.Println("NetHandler: Connect Failed ->", err)
 		return false
 	}
 
 	fmt.Println("NetHandler: Success")
 	nh.conn = maybe_conn
+	nh.msgIn = make(chan NetMsg)
+	nh.msgOut = make(chan NetMsg)
+
+	go nh.sendMessages()
+	acceptor := MsgAcceptor{
+		conn:     nh.conn,
+		msg_chan: nh.msgIn,
+		nh:       nh,
+	}
+	go acceptor.AcceptMessages()
+	nh.wg.Add(2)
+
 	return true
 }
 
-func (nh *NetHandler) shutdownFunc() {
-	fmt.Println("NetHandler: Shutting down...")
+func (nh *NetHandler) Disconnect() {
+	fmt.Println("NetHandler: Disconnecting...")
 
-	close(nh.msgOut)
+	// this should stop sender
+	if nh.msgOut != nil {
+		close(nh.msgOut)
+		nh.msgOut = nil
+	}
 
+	// this should stop receiver
 	if nh.conn != nil {
 		nh.conn.Close()
+		nh.conn = nil
 	}
-}
 
-func (nh *NetHandler) Shutdown() {
-	nh.shutdownOnce.Do(nh.shutdownFunc)
+	// if both threads are already dead, this should be noop
+	nh.wg.Wait()
+
+	if nh.msgIn != nil {
+		close(nh.msgIn)
+		nh.msgIn = nil
+	}
+
+	fmt.Println("NetHandler: Disconnected")
 }
 
 func (nh *NetHandler) MsgIn() chan NetMsg {
@@ -92,25 +107,7 @@ func (nh *NetHandler) MsgOut() chan NetMsg {
 	return nh.msgOut
 }
 
-func (nh *NetHandler) Run() {
-	nh.wg.Add(2)
-
-	// startups the 2 actual compute threads
-	go nh.sendMessages() // startup sending messages
-
-	acceptor := MsgAcceptor{
-		conn:     nh.conn,
-		msg_chan: nh.msgIn,
-	}
-	go acceptor.AcceptMessages() // startup receiving messages
-
-	nh.wg.Wait()
-
-	close(nh.msgIn)
-}
-
 func (nh *NetHandler) sendMessages() {
-	defer nh.wg.Done()
 	fmt.Println("Sender Thread Starting ... ")
 
 	msg_builder := strings.Builder{}
@@ -121,12 +118,14 @@ func (nh *NetHandler) sendMessages() {
 		if err != nil {
 			// write error, means socket was closed
 			fmt.Println("Sender Thread: Write error:", err)
-			nh.Shutdown()
+			nh.wg.Done()
+			nh.Disconnect()
 			return
 		}
 	}
 
 	fmt.Println("Sender Thread Ending")
+	nh.wg.Done()
 }
 
 // creates the string that can be transmitted with network.Write()
@@ -198,7 +197,8 @@ func (self *MsgAcceptor) AcceptMessages() {
 			}
 
 			fmt.Println("Accepter Thread: Read error:", err)
-			self.nh.Shutdown()
+			self.nh.wg.Done()
+			self.nh.Disconnect()
 			return
 		}
 
@@ -210,7 +210,9 @@ func (self *MsgAcceptor) AcceptMessages() {
 
 			if results.error_occured {
 				fmt.Println("Accepter Thread: Client sent goobledegook")
-				self.nh.Shutdown()
+				// even though the thread is still running, it will quickly close
+				self.nh.wg.Done()
+				self.nh.Disconnect()
 				return
 			}
 
