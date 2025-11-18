@@ -11,12 +11,15 @@ import (
 )
 
 func buildUI(ctx *ProgCtx) {
-	buildMainMenu(ctx)
-	buildServerConnectMenu(ctx)
-	buildConnectingScreen(ctx)
+	ctx.UI.MainMenu = buildMainMenu(ctx)
+	ctx.UI.ServerSelect = buildServerConnectMenu(ctx)
+	ctx.UI.Connecting = buildConnectingScreen(ctx)
+	ctx.UI.Game = buildGameScreen(ctx)
 }
 
-func buildMainMenu(ctx *ProgCtx) {
+func buildMainMenu(ctx *ProgCtx) UIElement {
+	_ = ctx
+
 	mainMenu := w.NewVStack(10)
 	connect_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect", 150, 50))
 	close_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_CloseBtn", "Close", 150, 50))
@@ -26,10 +29,10 @@ func buildMainMenu(ctx *ProgCtx) {
 	mainMenuPanel := w.NewPanelComponent(rl.DarkGray, mainMenu)
 	mainMenuBounds := w.NewBoundsBox(0.6, 0.8, mainMenuPanel)
 
-	ctx.UI.MainMenu = UIElement{dirty: true, component: mainMenuBounds}
+	return UIElement{dirty: true, component: mainMenuBounds}
 }
 
-func buildServerConnectMenu(ctx *ProgCtx) {
+func buildServerConnectMenu(ctx *ProgCtx) UIElement {
 	serverMenu := w.NewHStack(10)
 
 	ipTextBox := w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, 16)
@@ -50,10 +53,12 @@ func buildServerConnectMenu(ctx *ProgCtx) {
 	serverMenuPanel := w.NewPanelComponent(rl.Gray, serverMenu)
 	serverMenuBounds := w.NewBoundsBox(0.9, 0.9, serverMenuPanel)
 
-	ctx.UI.ServerSelect = UIElement{dirty: true, component: serverMenuBounds}
+	return UIElement{dirty: true, component: serverMenuBounds}
 }
 
-func buildConnectingScreen(ctx *ProgCtx) {
+func buildConnectingScreen(ctx *ProgCtx) UIElement {
+	_ = ctx
+
 	connecting := w.NewVStack(10)
 	label := w.NewCenterComponent(w.NewLabelComponent("Connecting...", 20, rl.White))
 	cancel_btn := w.NewCenterComponent(w.NewButtonComponent("Connecting_CancelBtn", "Cancel", 150, 50))
@@ -63,7 +68,43 @@ func buildConnectingScreen(ctx *ProgCtx) {
 	connectingPanel := w.NewPanelComponent(rl.Gray, connecting)
 	connectingBounds := w.NewBoundsBox(0.4, 0.4, connectingPanel)
 
-	ctx.UI.Connecting = UIElement{dirty: true, component: connectingBounds}
+	return UIElement{dirty: true, component: connectingBounds}
+}
+
+// TODO Put more state info into GameState which I will connect here
+func buildGameScreen(ctx *ProgCtx) UIElement {
+	_ = ctx
+
+	screen := w.NewGameScreen(10)
+	screenPanel := w.NewPanelComponent(rl.DarkGreen, screen)
+	screen.AddPlayerCard(buildPlayerCard())
+
+	foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 150, 50)
+	betBtn := w.NewButtonComponent("Game_Bet", "Fold", 150, 50)
+	checkBtn := w.NewButtonComponent("Game_Check", "Fold", 150, 50)
+	leaveBtn := w.NewButtonComponent("Game_Leave", "Fold", 150, 50)
+
+	screen.AddActionButton(foldBtn)
+	screen.AddActionButton(betBtn)
+	screen.AddActionButton(checkBtn)
+	screen.AddActionButton(leaveBtn)
+
+	return UIElement{dirty: true, component: screenPanel}
+}
+
+func buildPlayerCard( /*Insert Player Info Here*/ ) w.RGComponent {
+	player := w.NewVStack(5)
+	playerPanel := w.NewPanelComponent(rl.DarkBlue, player)
+
+	playerName := w.NewLabelComponent("TestPlayer", 12, rl.RayWhite)
+	// eventually have to change to TextBox which will never be editable
+	tokenLabel := w.NewLabelComponent("10_000", 12, rl.RayWhite)
+	statusLabel := w.NewLabelComponent("Connected", 12, rl.RayWhite)
+	player.AddChild(playerName)
+	player.AddChild(tokenLabel)
+	player.AddChild(statusLabel)
+
+	return playerPanel
 }
 
 func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {

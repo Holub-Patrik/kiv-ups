@@ -59,6 +59,7 @@ type UIStore struct {
 	MainMenu     UIElement
 	ServerSelect UIElement
 	Connecting   UIElement
+	Game         UIElement
 }
 
 func (store *UIStore) SetDirty() {
