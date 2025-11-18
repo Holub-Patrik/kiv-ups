@@ -11,6 +11,12 @@ import (
 )
 
 func buildUI(ctx *ProgCtx) {
+	buildMainMenu(ctx)
+	buildServerConnectMenu(ctx)
+	buildConnectingScreen(ctx)
+}
+
+func buildMainMenu(ctx *ProgCtx) {
 	mainMenu := w.NewVStack(10)
 	connect_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect", 150, 50))
 	close_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_CloseBtn", "Close", 150, 50))
@@ -21,18 +27,33 @@ func buildUI(ctx *ProgCtx) {
 	mainMenuBounds := w.NewBoundsBox(0.6, 0.8, mainMenuPanel)
 
 	ctx.UI.MainMenu = UIElement{dirty: true, component: mainMenuBounds}
+}
 
+func buildServerConnectMenu(ctx *ProgCtx) {
 	serverMenu := w.NewHStack(10)
-	serverMenu.AddChild(w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, &ctx.StateMutex, 16))
-	serverMenu.AddChild(w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, &ctx.StateMutex, 6))
-	confirm_btn := w.NewCenterComponent(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
-	serverMenu.AddChild(confirm_btn)
+
+	ipTextBox := w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, 16)
+	ipTextBoxPanel := w.NewPanelComponent(rl.RayWhite, ipTextBox)
+	ipTextBoxCentered := w.NewCenterComponent(ipTextBoxPanel)
+	ipTextBoxBounded := w.NewBoundsBox(1, 0.3, ipTextBoxCentered)
+	serverMenu.AddChild(ipTextBoxBounded)
+
+	portTextBox := w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, 6)
+	portTextBoxPanel := w.NewPanelComponent(rl.RayWhite, portTextBox)
+	portTextBoxCentered := w.NewCenterComponent(portTextBoxPanel)
+	portTextBoxBounded := w.NewBoundsBox(1, 0.3, portTextBoxCentered)
+	serverMenu.AddChild(portTextBoxBounded)
+
+	confirmBtn := w.NewCenterComponent(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
+	serverMenu.AddChild(confirmBtn)
 
 	serverMenuPanel := w.NewPanelComponent(rl.Gray, serverMenu)
 	serverMenuBounds := w.NewBoundsBox(0.9, 0.9, serverMenuPanel)
 
 	ctx.UI.ServerSelect = UIElement{dirty: true, component: serverMenuBounds}
+}
 
+func buildConnectingScreen(ctx *ProgCtx) {
 	connecting := w.NewVStack(10)
 	label := w.NewCenterComponent(w.NewLabelComponent("Connecting...", 20, rl.White))
 	cancel_btn := w.NewCenterComponent(w.NewButtonComponent("Connecting_CancelBtn", "Cancel", 150, 50))

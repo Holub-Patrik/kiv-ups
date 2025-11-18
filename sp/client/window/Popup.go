@@ -6,6 +6,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+const margin float32 = 5
+
 type PopupComponent interface {
 	RGComponent
 	Update() bool // Returns true if the popup is still-alive
@@ -40,8 +42,8 @@ func (p *TimedPopup) Calculate(screenBounds rl.Rectangle) {
 
 	textSize := rl.MeasureTextEx(rl.GetFontDefault(), p.text, 20, 1)
 
-	p.bounds.Width = textSize.X
-	p.bounds.Height = textSize.Y
+	p.bounds.Width = textSize.X + 2*margin
+	p.bounds.Height = textSize.Y + 2*margin
 
 	p.bounds.X = screenBounds.X
 	p.bounds.Y = screenBounds.Y
@@ -56,8 +58,8 @@ func (p *TimedPopup) Draw(eventChannel chan<- UIEvent) {
 		rl.GetFontDefault(),
 		p.text,
 		rl.Vector2{
-			X: p.bounds.X,
-			Y: p.bounds.Y,
+			X: p.bounds.X + margin,
+			Y: p.bounds.Y + margin,
 		},
 		20,
 		1,

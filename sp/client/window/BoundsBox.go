@@ -37,8 +37,8 @@ func (b *BoundsBox) Calculate(bounds rl.Rectangle) {
 	innerY := (b.bounds.Height - innerHeight) / 2
 
 	childBounds := rl.Rectangle{
-		X:      innerX,
-		Y:      innerY,
+		X:      b.bounds.X + innerX,
+		Y:      b.bounds.Y + innerY,
 		Width:  innerWidth,
 		Height: innerHeight,
 	}

@@ -42,7 +42,7 @@ func (pm *PopupManager) Calculate(screenBounds rl.Rectangle) {
 
 		popupBounds := popup.GetBounds()
 
-		cur_bounds.Y += popupBounds.Height
+		cur_bounds.Y += popupBounds.Height + 5
 	}
 }
 
