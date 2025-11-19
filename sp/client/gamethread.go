@@ -109,6 +109,8 @@ func handleUserInput(ctx *ProgCtx, input UserInputEvent) {
 		ctx.State.IsConnecting = false
 		ctx.StateMutex.Unlock()
 
+	case EvtRoomJoin:
+
 	case EvtQuit:
 		ctx.ShouldClose = true
 	}

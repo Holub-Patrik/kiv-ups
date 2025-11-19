@@ -1,194 +1,46 @@
 #pragma once
 
-#include "CircularBufferQueue.hpp"
+#include "Babel.hpp"
+
 #include "MessageSerde.hpp"
+#include "PlayerInfo.hpp"
+#include "RoomThread.hpp"
 #include "SockWrapper.hpp"
 
-#include <chrono>
-#include <sstream>
+#include <mutex>
+#include <optional>
 #include <sys/socket.h>
 #include <thread>
 
-struct MsgStruct {
-  std::string code;
-  std::optional<std::string> payload = std::nullopt;
-
-  std::string to_string() const {
-    std::stringstream ss;
-    ss << "PKR";
-
-    if (payload) {
-      ss << "P";
-    } else {
-      ss << "N";
-    }
-
-    ss << code;
-    if (payload) {
-      const auto& contents = payload.value();
-      const auto& len_str = std::format("{:04d}", contents.size());
-      ss << len_str << contents;
-    }
-
-    ss << "\n";
-    return ss.str();
-  }
-};
-
-struct Room {
-  std::string id;
-  std::string name;
-  int current_players;
-  int max_players;
-
-  std::string to_payload_string() const {
-    std::stringstream ss;
-    ss << std::format("{:04}", std::stoi(id));
-    ss << std::format("{:04}", name.length());
-    ss << name;
-    ss << std::format("{:02}", current_players);
-    ss << std::format("{:02}", max_players);
-    return ss.str();
-  }
-};
-
-enum class PlayerState {
-  Connected,     // Just connected, waiting for CONN
-  AwaitingRooms, // Sent 00OK, waiting for RMRQ
-  SendingRooms,  // Received RMRQ, busy sending room list
-  AwaitingJoin   // Finished sending rooms, waiting for join request
-};
-
-class PlayerInfo final {
-private:
-  RemoteSocket sock;
-  bool still_connected = true;
-
-  std::thread acceptor_thread;
-  std::thread sender_thread;
-
-  std::atomic<bool> acceptor_stop = false;
-  std::atomic<bool> sender_stop = false;
-
-  CB::Buffer<MsgStruct, 128> msg_in;
-  CB::Buffer<MsgStruct, 128> msg_out;
-
-  auto acceptor() -> void {
-    CB::Writer out{msg_in};
-    std::array<char, 256> byte_buf{0};
-    Net::Serde::MainParser parser{};
-
-    std::cout << "Accepter thread started" << std::endl;
-
-    while (!acceptor_stop) {
-
-      const auto bytes_read =
-          recv(sock.get_fd(), byte_buf.data(), byte_buf.size(), MSG_DONTWAIT);
-
-      if (bytes_read == 0) {
-        std::cout << "Client disconnected (FD: " << sock.get_fd() << ")\n";
-        acceptor_stop = true;
-        sender_stop = true;
-        break;
-      } else if (bytes_read < 0) { // No data or error
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        continue;
-      }
-      std::cout << "Recieved: " << bytes_read << std::endl;
-
-      usize total_parsed_bytes = 0;
-      Net::Serde::ParseResults results{};
-
-      while (true) {
-        const auto& start = byte_buf.begin() + total_parsed_bytes;
-        const auto& end = byte_buf.begin() + bytes_read;
-
-        results = parser.parse_bytes(std::string_view{start, end});
-
-        if (results.error_occured) {
-          // set stop to true
-          acceptor_stop = true;
-          return;
-        }
-
-        if (results.parser_done) {
-          out.wait_and_insert(MsgStruct{results.code, results.payload});
-          parser.reset_parser();
-        }
-
-        total_parsed_bytes += results.bytes_parsed;
-
-        if (total_parsed_bytes >= bytes_read) {
-          break;
-        }
-      }
-    }
-
-    std::cout << "Accepter thread ending" << std::endl;
-  }
-
-  auto sender() -> void {
-    CB::Reader in{msg_out};
-    while (!sender_stop) {
-      const auto& maybe_msg = in.read();
-      if (maybe_msg) {
-        const auto& msg = maybe_msg.value();
-        const auto& msg_str = msg.to_string();
-        if (send(sock.get_fd(), msg_str.data(), msg_str.size(), 0) < 0) {
-          std::cerr << "Send error, disconnecting client FD: " << sock.get_fd()
-                    << "\n";
-          sender_stop = true;
-          acceptor_stop = true;
-        }
-      } else {
-        std::this_thread::sleep_for(std::chrono::milliseconds{20});
-      }
-    }
-  }
-
-public:
-  PlayerState state = PlayerState::Connected;
-  int room_send_index = 0;
-
-  CB::Reader<MsgStruct, 128> msg_in_reader;
-  CB::Writer<MsgStruct, 128> msg_out_writer;
-
-  virtual ~PlayerInfo() {
-    sender_stop = true;
-    acceptor_stop = true;
-    sender_thread.join();
-    acceptor_thread.join();
-  }
-
-  PlayerInfo(const ServerSocket& server_sock)
-      : sock(server_sock), msg_in_reader(msg_in), msg_out_writer(msg_out) {}
-
-  auto run() -> void {
-    acceptor_thread = std::thread{[this] { acceptor(); }};
-    sender_thread = std::thread([this]() { sender(); });
-  }
-
-  bool is_connected() const { return !acceptor_stop && !sender_stop; }
-};
+using namespace std::chrono_literals;
 
 class Server final {
 private:
-  std::vector<std::unique_ptr<PlayerInfo>> players;
-  std::vector<Room> rooms;
+  vec<uq_ptr<PlayerInfo>> players;
   std::mutex player_mutex;
+  // has to be unique_ptr since Room has logic which requires that copy and move
+  // be deleted
+  vec<uq_ptr<Room>> rooms;
   std::atomic<bool> running = false;
   std::thread logic_thread;
 
-  void process_logic() {
+  auto process_logic() -> void {
     while (running) {
-      { // Mutex scope
-        std::lock_guard<std::mutex> lock(player_mutex);
+      {
+        std::lock_guard g{player_mutex};
 
-        for (auto& player_ptr : players) {
-          // this will process all messages
-          // should be simple to reimplement as just one if one client
-          // absolutely floods the server
-          process_player_messages(*player_ptr);
+        vec<pair<usize, usize>> players_to_move{};
+        for (usize i = 0; i < players.size(); i++) {
+          const auto wants_to_join = process_player_messages(*players[i]);
+
+          if (wants_to_join) {
+            players_to_move.push_back({i, wants_to_join.value()});
+          }
+        }
+
+        for (const auto& [p_idx, room_idx] : players_to_move) {
+          rooms[room_idx]->accept_player(std::move(players[p_idx]));
+          players.erase(players.begin() + p_idx);
         }
 
         players.erase(std::remove_if(players.begin(), players.end(),
@@ -198,16 +50,21 @@ private:
                       players.end());
       }
 
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      std::this_thread::sleep_for(50ms);
     }
   }
 
-  void process_player_messages(PlayerInfo& player) {
-    while (true) {
+  auto process_player_messages(PlayerInfo& player) -> opt<usize> {
+    for (usize i = 0; i < MSG_BATCH_SIZE; i++) {
+      player.accept_messages();
+
       auto msg_opt = player.msg_in_reader.read();
       if (!msg_opt) {
         break; // No more messages
       }
+
+      bool room_exists = false;
+      usize room_idx = 0;
 
       auto msg = msg_opt.value();
       std::cout << "Processing message (Code: " << msg.code << ") for state "
@@ -218,7 +75,7 @@ private:
       case PlayerState::Connected:
         if (msg.code == "CONN") {
           std::cout << "Player sent CONN, sending 00OK\n";
-          player.msg_out_writer.wait_and_insert({"00OK", std::nullopt});
+          player.msg_out_writer.wait_and_insert({"00OK", null});
           player.state = PlayerState::AwaitingRooms;
         }
         break;
@@ -240,14 +97,45 @@ private:
         break;
 
       case PlayerState::AwaitingJoin:
+        if (msg.code == "JOIN") {
+          const auto& maybe_id = Net::Serde::read_bg_int(msg.payload.value());
+
+          if (!maybe_id) {
+            player.msg_out_writer.wait_and_insert({"FAIL", null});
+            // here I should dconn the player since he sent weird data
+          }
+
+          const auto& [req_id, _] = maybe_id.value();
+
+          for (usize i = 0; i < rooms.size(); i++) {
+            const auto& room = *rooms[i];
+            if (room.id == req_id) {
+              if (!room.can_player_join()) {
+                player.msg_out_writer.wait_and_insert({"FAIL", null});
+                break;
+              } else {
+                room_exists = true;
+                room_idx = i;
+                break;
+              }
+            }
+          }
+        }
         break;
       }
+
+      player.send_messages();
+
+      if (room_exists) {
+        return room_idx;
+      }
     }
+    return null;
   }
 
   void send_room_info(PlayerInfo& player) {
     if (player.room_send_index < rooms.size()) {
-      const auto& room = rooms[player.room_send_index];
+      const auto& room = *rooms[player.room_send_index];
       std::string room_payload = room.to_payload_string();
 
       std::cout << "Sending room: " << room.name << "\n";
@@ -255,12 +143,26 @@ private:
       player.room_send_index++;
     } else {
       std::cout << "Done sending rooms, sending DONE\n";
-      player.msg_out_writer.wait_and_insert({"DONE", std::nullopt});
+      player.msg_out_writer.wait_and_insert({"DONE", null});
       player.state = PlayerState::AwaitingJoin;
     }
   }
 
 public:
+  Server(/* add config obj/struct here */) {
+    rooms.emplace_back(
+        std::make_unique<Room>(1, "Room 1", players, player_mutex));
+
+    rooms.emplace_back(
+        std::make_unique<Room>(2, "Room 2", players, player_mutex));
+
+    rooms.emplace_back(
+        std::make_unique<Room>(3, "Room 3", players, player_mutex));
+
+    rooms.emplace_back(
+        std::make_unique<Room>(4, "Room 4", players, player_mutex));
+  }
+
   ~Server() {
     running = false;
     if (logic_thread.joinable()) {
@@ -270,10 +172,6 @@ public:
 
   auto run(std::uint16_t port) -> void {
     std::cout << "Server starting" << std::endl;
-    rooms.reserve(3);
-    rooms.push_back({"1", "TestRoom1", 0, 4});
-    rooms.push_back({"2", "BigStakes", 0, 8});
-    rooms.push_back({"3", "Casuals", 0, 6});
 
     running = true;
     logic_thread = std::thread(&Server::process_logic, this);
@@ -286,7 +184,6 @@ public:
         std::cout << "Waiting for new connection...\n";
 
         auto new_player = std::make_unique<PlayerInfo>(server_sock);
-        new_player->run();
 
         { // Mutex scope
           std::lock_guard<std::mutex> lock(player_mutex);

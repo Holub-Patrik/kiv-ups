@@ -2,88 +2,122 @@
 
 #include <cstddef>
 #include <iostream>
+#include <iterator>
 #include <optional>
+#include <sstream>
 #include <string>
-#include <string_view>
-#include <vector>
+
+#include "Babel.hpp"
 
 constexpr std::size_t MSG_CODE_SIZE = 4;
 constexpr std::size_t PAYLOAD_LEN_SIZE = 4;
-constexpr std::size_t SIZESTR_LEN = 4;
+constexpr std::size_t BG_INT_STR_LEN = 4;
+constexpr std::size_t SM_INT_STR_LEN = 2;
 
-namespace {
-using str = std::string;
-using str_v = std::string_view;
-using usize = std::size_t;
+static constexpr std::size_t sm_int_byte_count = 2;
+static constexpr std::size_t bg_int_byte_count = 4;
 
-template <typename T> using opt = std::optional<T>;
-template <typename T> using vec = std::vector<T>;
-template <typename T, usize S> using arr = std::array<T, S>;
+namespace Net {
 
-constexpr std::nullopt_t null = std::nullopt;
+struct MsgStruct {
+  std::string code;
+  std::optional<std::string> payload = std::nullopt;
 
-} // namespace
+  std::string to_string() const {
+    std::stringstream ss;
+    ss << "PKR";
 
-static opt<usize> read_size(const str& payload, const usize begin_index = 0) {
-  if ((payload.size() - begin_index) < SIZESTR_LEN) {
+    if (payload) {
+      ss << "P";
+    } else {
+      ss << "N";
+    }
+
+    ss << code;
+    if (payload) {
+      const auto& contents = payload.value();
+      const auto& len_str = std::format("{:04d}", contents.size());
+      ss << len_str << contents;
+    }
+
+    ss << "\n";
+    return ss.str();
+  }
+};
+
+namespace Serde {
+
+inline opt<pair<usize, usize>> read_sm_int(const str& payload,
+                                           const usize begin_index = 0) {
+  if ((payload.size() - begin_index) < SM_INT_STR_LEN) {
     return null;
   }
 
   const auto& start = payload.begin() + begin_index;
-  const auto& end = start + SIZESTR_LEN;
+  const auto& end = start + SM_INT_STR_LEN;
 
-  const auto& size_str_v = str_v{start, end};
+  const auto& sm_int_str_v = str_v{start, end};
 
-  usize size = 0;
-  for (const auto& byte : size_str_v) {
+  usize sm_int = 0;
+  for (const auto& byte : sm_int_str_v) {
     if (byte < '0' || byte > '9') {
       return null;
     }
 
-    size = size * 10 + static_cast<usize>(byte - '0');
+    sm_int = sm_int * 10 + static_cast<usize>(byte - '0');
   }
 
-  return size;
+  return pair{sm_int, sm_int_byte_count};
 }
 
-static opt<str> read_var_str(const str& payload, const usize begin_index = 0) {
-  const auto& m_size = read_size(payload, begin_index);
-  if (!m_size) {
-    return null; // invalid characters within size
-  }
-  const auto& size = m_size.value();
-
-  if ((payload.size() - SIZESTR_LEN) < size) {
-    return null; // size specifies longer string than is present
+inline opt<std::pair<usize, usize>> read_bg_int(const str& payload,
+                                                const usize begin_index = 0) {
+  if ((payload.size() - begin_index) < BG_INT_STR_LEN) {
+    return null;
   }
 
-  const auto& start = payload.begin() + begin_index + SIZESTR_LEN;
-  const auto& end = start + size;
+  const auto& start = payload.begin() + begin_index;
+  const auto& end = start + BG_INT_STR_LEN;
 
-  return str{start, end};
-}
+  const auto& big_int_str_v = str_v{start, end};
 
-namespace Net {
-
-namespace Msg {
-
-struct GeneralString {
-  str msg;
-
-  static opt<GeneralString> emit_msg(const str& payload) {
-    const auto& m_msg = read_var_str(payload);
-
-    if (!m_msg) {
+  usize bg_int = 0;
+  for (const auto& byte : big_int_str_v) {
+    if (byte < '0' || byte > '9') {
       return null;
     }
 
-    return GeneralString{m_msg.value()};
+    bg_int = bg_int * 10 + static_cast<usize>(byte - '0');
   }
-};
 
-} // namespace Msg
+  return pair{bg_int, bg_int_byte_count};
+}
 
-namespace Serde {
+inline opt<std::pair<str, usize>> read_str(const str& payload,
+                                           const usize begin_index = 0) {
+  const auto& m_size = read_bg_int(payload, begin_index);
+  if (!m_size) {
+    return null; // invalid characters within size
+  }
+
+  const auto& [size, bytes_read] = m_size.value();
+  if ((payload.size() - BG_INT_STR_LEN) < size) {
+    return null; // size specifies longer string than is present
+  }
+
+  const auto& start = payload.begin() + begin_index + BG_INT_STR_LEN;
+  const auto& end = start + size;
+
+  const usize total_bytes_read = bytes_read + std::distance(start, end);
+
+  return pair{str{start, end}, total_bytes_read};
+}
+
+inline str write_sm_int(usize num) { return std::format("{:02d}", num); }
+inline str write_bg_int(usize num) { return std::format("{:04d}", num); }
+inline str write_net_str(const str& usr_str) {
+  return write_bg_int(usr_str.size()) + usr_str;
+}
 
 enum class MainPart {
   Magic_1,
