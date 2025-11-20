@@ -5,6 +5,8 @@
 #include "MessageSerde.hpp"
 #include "PlayerInfo.hpp"
 
+#include <algorithm>
+#include <deque>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -12,7 +14,7 @@
 #include <vector>
 
 constexpr usize ROOM_MAX_PLAYERS = 4;
-constexpr int TURN_TIMEOUT_SECONDS = 3000;
+constexpr int TURN_TIMEOUT_SECONDS = 30; // Reduced for testing
 
 enum class RoomState {
   WaitingForStart,
@@ -38,14 +40,10 @@ private:
   std::mt19937 rng{std::random_device{}()};
 
 public:
-  Deck() {
-    cards.resize(52);
-    std::iota(cards.begin(), cards.end(), 0);
-  }
+  Deck() { reset(); }
 
   void shuffle() { std::shuffle(cards.begin(), cards.end(), rng); }
 
-  // Returns 255 if empty (shouldn't happen in simple poker)
   uint8_t draw() {
     if (cards.empty())
       return 255;
@@ -62,7 +60,7 @@ public:
 };
 
 struct PlayerGameContext {
-  PlayerInfo* info_ptr; // Non-owning pointer to the actual connection
+  PlayerInfo* info_ptr; // Non-owning pointer
   bool is_folded = false;
   bool is_ready = false;
   int current_round_bet = 0;
@@ -82,18 +80,13 @@ struct PlayerGameContext {
 
 class Room final {
 private:
-  // temporary vector that holds the pointers
-  // It is used so that MainThread stops handling these players
   vec<uq_ptr<PlayerInfo>> players;
-  // return information
   vec<uq_ptr<PlayerInfo>>& return_arr;
   std::mutex& return_mtx;
-
-  vec<PlayerGameContext> player_contexts;
-
   std::thread room_thread;
   std::atomic<bool> running = false;
 
+  vec<PlayerGameContext> player_contexts;
   Deck deck;
   RoomState state = RoomState::WaitingForStart;
   RoundPhase round_phase = RoundPhase::PreFlop;
@@ -101,27 +94,19 @@ private:
   vec<u8> community_cards;
   int pot = 0;
   int current_highest_bet = 0;
+  bool bet_placed_this_round = false;
 
-  std::deque<usize> action_queue; // Stores indices of players who need to act
+  std::deque<usize> action_queue; // Indices of players
   std::chrono::steady_clock::time_point turn_deadline;
   bool waiting_for_action = false;
 
-  void broadcast(const str& code, const opt<str>& payload) {
-    for (auto& p : players) {
-      if (p->is_connected()) {
-        p->msg_out_writer.wait_and_insert({code, payload});
-      }
-    }
-  }
-
   void room_logic() {
     while (running) {
-
       if (state == RoomState::WaitingForStart) {
         cleanup_disconnected_lobby();
       }
 
-      process_incoming_messages();
+      process_all_players_messages();
 
       switch (state) {
       case RoomState::WaitingForStart:
@@ -133,7 +118,7 @@ private:
         break;
 
       case RoomState::BettingRound:
-        process_betting_logic();
+        process_timeout_logic();
         break;
 
       case RoomState::RevealCommunity:
@@ -141,8 +126,7 @@ private:
         break;
 
       case RoomState::Showdown:
-        // TODO: Implement Scoring logic
-        reset_to_lobby();
+        determine_winner_and_reset();
         break;
 
       case RoomState::Finished:
@@ -153,105 +137,240 @@ private:
     }
   }
 
-  void cleanup_disconnected_lobby() {
-    std::erase_if(players, [](const auto& p) { return !p->is_connected(); });
-    current_players = players.size();
-  }
+  void process_all_players_messages() {
+    if (players.size() != player_contexts.size()) {
+      sync_contexts();
+    }
 
-  void process_incoming_messages() {
     for (size_t i = 0; i < players.size(); ++i) {
       auto& player = *players[i];
-
       player.accept_messages();
 
       while (auto msg_opt = player.msg_in_reader.read()) {
-        auto msg = msg_opt.value();
-        handle_message(i, msg);
+        dispatch_message(i, msg_opt.value());
+        std::cout << std::format("R #{}: Processed player message", id)
+                  << std::endl;
       }
 
       player.send_messages();
     }
   }
 
-  void handle_message(size_t player_idx, const Net::MsgStruct& msg) {
-    if (state == RoomState::WaitingForStart) {
+  void dispatch_message(size_t player_idx, const Net::MsgStruct& msg) {
+    switch (state) {
+    case RoomState::WaitingForStart:
       if (msg.code == "RDY1") {
-        // Initialize context if not exists (lazy init)
-        ensure_contexts_synced();
-        if (player_idx < player_contexts.size()) {
-          player_contexts[player_idx].is_ready = true;
-          std::cout << "Player " << player_idx << " is READY.\n";
+        handle_lobby_ready(player_idx);
+      }
+      break;
+
+    case RoomState::BettingRound:
+      if (!action_queue.empty() && action_queue.front() == player_idx) {
+        handle_betting_action(player_idx, msg);
+      } else {
+        // Optional: Send "Not your turn" or "Wait" warning
+        // For now, we silently ignore out-of-turn messages to prevent state
+        // corruption
+      }
+      break;
+
+    default:
+      break;
+    }
+  }
+
+  void handle_lobby_ready(size_t player_idx) {
+    if (player_idx < player_contexts.size()) {
+      std::cout << "Player: " << player_idx << " Sent Ready" << std::endl;
+      player_contexts[player_idx].is_ready = true;
+      broadcast("RDOK", Net::Serde::write_sm_int(player_idx));
+    }
+  }
+
+  void handle_betting_action(size_t player_idx, const Net::MsgStruct& msg) {
+    auto& ctx = player_contexts[player_idx];
+    bool action_accepted = false;
+
+    if (msg.code == "FOLD") {
+      ctx.is_folded = true;
+      broadcast("FOLD", std::format("{:02}", player_idx));
+      action_accepted = true;
+    } else if (msg.code == "CHCK") {
+      // Double check needed here
+      if (current_highest_bet == ctx.current_round_bet) {
+        broadcast("CHCK", std::format("{:02}", player_idx));
+        action_accepted = true;
+      } else {
+        send_error(player_idx, "Cannot check, must Call or Fold");
+      }
+    } else if (msg.code == "CALL") {
+      // Valid only if there is a bet to call
+      if (current_highest_bet > ctx.current_round_bet) {
+        int amount_to_call = current_highest_bet - ctx.current_round_bet;
+        ctx.current_round_bet += amount_to_call;
+        pot += amount_to_call;
+        broadcast("CALL",
+                  std::format("{:02}{:04}", player_idx, current_highest_bet));
+        action_accepted = true;
+      } else {
+        // If bets are equal, a Call is effectively a Check
+        broadcast("CHCK", std::format("{:02}", player_idx));
+        action_accepted = true;
+      }
+    } else if (msg.code == "BETT") {
+      if (bet_placed_this_round) {
+        send_error(player_idx, "Cannot raise. Only Call or Fold allowed.");
+      } else {
+        int amount = 0;
+        try {
+          amount = std::stoi(msg.payload.value_or("0"));
+        } catch (...) {
+        }
+
+        if (amount > 0) {
+          current_highest_bet = amount;
+          ctx.current_round_bet = amount;
+          pot += amount;
+          bet_placed_this_round = true;
+
+          broadcast("BETT", std::format("{:02}{:04}", player_idx, amount));
+
+          requeue_active_players(player_idx);
+          action_accepted = true;
         }
       }
-    } else if (state == RoomState::BettingRound) {
-      if (waiting_for_action && !action_queue.empty() &&
-          action_queue.front() == player_idx) {
-        handle_game_move(player_idx, msg);
+    }
+
+    if (action_accepted) {
+      action_queue.pop_front();
+      waiting_for_action = false;
+      start_next_turn_or_phase();
+    }
+  }
+
+  void start_next_turn_or_phase() {
+    if (action_queue.empty()) {
+      advance_phase();
+      return;
+    }
+
+    size_t next_idx = action_queue.front();
+
+    if (!players[next_idx]->is_connected()) {
+      player_contexts[next_idx].is_folded = true;
+      broadcast("FOLD", std::format("{:02}", next_idx));
+      action_queue.pop_front();
+      start_next_turn_or_phase();
+      return;
+    }
+
+    waiting_for_action = true;
+    turn_deadline = std::chrono::steady_clock::now() +
+                    std::chrono::seconds(TURN_TIMEOUT_SECONDS);
+
+    broadcast("TURN", std::format("{:02}", next_idx));
+  }
+
+  void requeue_active_players(size_t aggressor_idx) {
+    for (size_t i = 0; i < player_contexts.size(); ++i) {
+      if (i == aggressor_idx)
+        continue;
+      if (player_contexts[i].is_folded)
+        continue;
+
+      bool already_queued = false;
+      for (auto q : action_queue) {
+        if (q == i)
+          already_queued = true;
+      }
+
+      if (!already_queued) {
+        action_queue.push_back(i);
       }
     }
   }
 
-  void ensure_contexts_synced() {
-    if (player_contexts.size() != players.size()) {
-      player_contexts.clear();
-      for (auto& p : players) {
-        player_contexts.push_back({p.get()});
-      }
+  void advance_phase() {
+    if (round_phase == RoundPhase::River) {
+      state = RoomState::Showdown;
+    } else {
+      if (round_phase == RoundPhase::PreFlop)
+        round_phase = RoundPhase::Flop;
+      else if (round_phase == RoundPhase::Flop)
+        round_phase = RoundPhase::Turn;
+      else if (round_phase == RoundPhase::Turn)
+        round_phase = RoundPhase::River;
+
+      state = RoomState::RevealCommunity;
     }
   }
 
   void check_start_conditions() {
     if (players.size() < 2)
-      return; // Need at least 2 to play
+      return;
 
-    ensure_contexts_synced();
+    if (players.size() != player_contexts.size()) {
+      sync_contexts();
+    }
+
+    std::cout << std::format("R #{}: Checking start conditions", id)
+              << std::endl;
 
     bool all_ready = true;
+    int index = 0;
     for (const auto& ctx : player_contexts) {
       if (!ctx.is_ready) {
+        std::cout << "P #" << index << " Is not ready | "
+                  << (ctx.is_ready ? "True" : "False") << std::endl;
         all_ready = false;
         break;
       }
     }
 
     if (all_ready) {
-      std::cout << "All players ready. Locking room and starting game.\n";
       state = RoomState::Dealing;
       deck.reset();
       pot = 0;
       round_phase = RoundPhase::PreFlop;
       community_cards.clear();
+      broadcast("GMST", null); // Game Start
     }
   }
 
   void perform_deal() {
-    std::cout << "Dealing cards...\n";
-
-    // Deal 2 cards to each player
     for (auto& ctx : player_contexts) {
       ctx.reset_game();
-      // Card 1
-      uint8_t c1 = deck.draw();
+      u8 c1 = deck.draw();
+      u8 c2 = deck.draw();
       ctx.hand.push_back(c1);
+      ctx.hand.push_back(c2);
+
       ctx.info_ptr->msg_out_writer.wait_and_insert(
           {"CDTP", std::format("{:02}", c1)});
-
-      // Card 2
-      uint8_t c2 = deck.draw();
-      ctx.hand.push_back(c2);
       ctx.info_ptr->msg_out_writer.wait_and_insert(
           {"CDTP", std::format("{:02}", c2)});
     }
 
-    // Setup Action Queue for Pre-Flop (Round 1)
-    prepare_betting_round();
+    prepare_new_betting_round();
   }
 
-  void prepare_betting_round() {
+  void reveal_next_cards() {
+    int count = (round_phase == RoundPhase::Flop) ? 3 : 1;
+
+    for (int i = 0; i < count; ++i) {
+      u8 c = deck.draw();
+      community_cards.push_back(c);
+      broadcast("CRVR", std::format("{:02}", c));
+    }
+
+    prepare_new_betting_round();
+  }
+
+  void prepare_new_betting_round() {
     action_queue.clear();
     current_highest_bet = 0;
+    bet_placed_this_round = false;
 
-    // Add all active (non-folded) players to the queue
     for (size_t i = 0; i < player_contexts.size(); ++i) {
       if (!player_contexts[i].is_folded && players[i]->is_connected()) {
         player_contexts[i].reset_round();
@@ -260,176 +379,70 @@ private:
     }
 
     state = RoomState::BettingRound;
-    start_next_turn();
+    start_next_turn_or_phase();
   }
 
-  void start_next_turn() {
-    if (action_queue.empty()) {
-      // Round Complete
-      advance_phase();
-      return;
-    }
-
-    size_t p_idx = action_queue.front();
-
-    // Check if player disconnected before their turn
-    if (!players[p_idx]->is_connected()) {
-      player_contexts[p_idx].is_folded = true;
-      broadcast("FOLD", std::to_string(p_idx)); // Notify others
-      action_queue.pop_front();
-      start_next_turn();
-      return;
-    }
-
-    waiting_for_action = true;
-
-    // Set Timeout
-    turn_deadline = std::chrono::steady_clock::now() +
-                    std::chrono::seconds(TURN_TIMEOUT_SECONDS);
-
-    // Notify players whose turn it is (optional: or just the player)
-    // Protocol wasn't specific, but usually good to tell everyone "P1 turn"
-    broadcast("TURN", std::format("{:02}", p_idx));
-  }
-
-  void handle_game_move(size_t player_idx, const Net::MsgStruct& msg) {
-    auto& ctx = player_contexts[player_idx];
-    bool valid_move = false;
-
-    // Parse action: "FOLD", "CHCK", "BETT"
-    if (msg.code == "FOLD") {
-      ctx.is_folded = true;
-      broadcast("FOLD", std::format("{:02}", player_idx));
-      valid_move = true;
-    } else if (msg.code == "CHCK") {
-      // Can only check if current bet matches highest
-      if (ctx.current_round_bet == current_highest_bet) {
-        broadcast("CHCK", std::format("{:02}", player_idx));
-        valid_move = true;
-      }
-    } else if (msg.code == "CALL") {
-
-    } else if (msg.code == "BETT") {
-      // Logic: Bets cannot be raised OVER.
-      // Meaning if High is 10, and I have 0, I bet 10 to CALL.
-      // If High is 0, I can bet X.
-
-      int amount = 0;
-      try {
-        if (msg.payload)
-          amount = std::stoi(msg.payload.value());
-      } catch (...) {
-        // somehow handle incorrect message here
-      }
-
-      if (amount > 0) {
-        // Logic: Update Pot
-        int diff = amount - ctx.current_round_bet;
-        pot += diff;
-        ctx.current_round_bet = amount;
-
-        broadcast("BETT", std::format("{:02}{:04}", player_idx,
-                                      amount)); // Simply echoing logic
-
-        // If this raises the highest bet
-        if (amount > current_highest_bet) {
-          current_highest_bet = amount;
-          requeue_players_for_bet(player_idx);
-        }
-        valid_move = true;
-      }
-    }
-
-    if (valid_move) {
-      waiting_for_action = false;
-      action_queue.pop_front(); // Remove current actor
-      start_next_turn();        // Process next in queue
-    }
-  }
-
-  void requeue_players_for_bet(size_t aggressor_idx) {
-    for (size_t i = 0; i < player_contexts.size(); ++i) {
-      if (i == aggressor_idx)
-        continue;
-      if (player_contexts[i].is_folded)
-        continue;
-
-      bool in_q = false;
-      for (auto q_idx : action_queue) {
-        if (q_idx == i)
-          in_q = true;
-      }
-
-      if (!in_q) {
-        action_queue.push_back(i);
-      }
-    }
-  }
-
-  void process_betting_logic() {
-    if (!waiting_for_action)
-      return;
-
-    auto now = std::chrono::steady_clock::now();
-    if (now > turn_deadline) {
+  void process_timeout_logic() {
+    if (waiting_for_action &&
+        std::chrono::steady_clock::now() > turn_deadline) {
       if (!action_queue.empty()) {
-        size_t p_idx = action_queue.front();
-        std::cout << "Player " << p_idx << " timed out.\n";
-
-        // TimeOUT + who
-        broadcast("TOUT", std::format("{:02}", p_idx));
-
-        player_contexts[p_idx].is_folded = true;
-
-        waiting_for_action = false;
+        size_t idx = action_queue.front();
+        broadcast("TOUT", std::format("{:02}", idx));
+        player_contexts[idx].is_folded = true; // Auto-fold on timeout
         action_queue.pop_front();
-        start_next_turn();
+        waiting_for_action = false;
+        start_next_turn_or_phase();
       }
     }
   }
 
-  void advance_phase() {
-    if (round_phase == RoundPhase::PreFlop) {
-      round_phase = RoundPhase::Flop;
-      state = RoomState::RevealCommunity;
-    } else if (round_phase == RoundPhase::Flop) {
-      round_phase = RoundPhase::Turn;
-      state = RoomState::RevealCommunity;
-    } else if (round_phase == RoundPhase::Turn) {
-      round_phase = RoundPhase::River;
-      state = RoomState::RevealCommunity;
-    } else if (round_phase == RoundPhase::River) {
-      state = RoomState::Showdown;
+  void determine_winner_and_reset() {
+    // Placeholder for win logic (hand evaluation)
+    // For now, just reset to lobby
+    broadcast("GMDN", null); // Game Done
+    for (const auto& p : players) {
+      p->flush_messages();
     }
-  }
-
-  void reveal_next_cards() {
-    int cards_to_reveal = 0;
-    if (round_phase == RoundPhase::Flop)
-      cards_to_reveal = 3;
-    else
-      cards_to_reveal = 1;
-
-    for (int i = 0; i < cards_to_reveal; ++i) {
-      uint8_t c = deck.draw();
-      community_cards.push_back(c);
-      // Card RiVeR
-      broadcast("CRVR", std::format("{:02}", c));
-    }
-
-    prepare_betting_round();
-  }
-
-  void reset_to_lobby() {
     state = RoomState::WaitingForStart;
-    // Game Done
-    broadcast("GMDN", null);
-    {
-      std::lock_guard g{return_mtx};
-      for (usize i = 0; i < players.size(); i++) {
-        // give back players to MainThread
-        return_arr.emplace_back(std::move(players[i]));
+
+    // Move players back to lobby thread logic
+    std::lock_guard g{return_mtx};
+    for (auto& p : players) {
+      return_arr.emplace_back(std::move(p));
+    }
+    players.clear();
+    player_contexts.clear();
+    current_players = 0;
+  }
+
+  void sync_contexts() {
+    player_contexts.clear();
+    for (auto& p : players) {
+      player_contexts.push_back({p.get()});
+    }
+  }
+
+  void cleanup_disconnected_lobby() {
+    const auto count_removed = std::erase_if(
+        players, [](const auto& p) { return !p->is_connected(); });
+
+    if (count_removed > 0) {
+      current_players = players.size();
+      sync_contexts();
+    }
+  }
+
+  void broadcast(const str& code, const opt<str>& payload) {
+    for (auto& p : players) {
+      if (p->is_connected()) {
+        p->msg_out_writer.wait_and_insert({code, payload});
       }
+    }
+  }
+
+  void send_error(size_t player_idx, const str& msg) {
+    if (player_idx < players.size()) {
+      players[player_idx]->msg_out_writer.wait_and_insert({"ERR_", msg});
     }
   }
 
@@ -449,16 +462,12 @@ public:
 
   ~Room() {
     running = false;
-    room_thread.join();
+    if (room_thread.joinable())
+      room_thread.join();
   }
 
-  // delete copy semantics
-  Room(const Room& other) = delete;
-  Room& operator=(const Room& other) = delete;
-
-  // delete move semantics
-  Room(Room&&) = delete;
-  Room& operator=(Room&&) = delete;
+  Room(const Room&) = delete;
+  Room& operator=(const Room&) = delete;
 
   str to_payload_string() const {
     using namespace Net::Serde;
@@ -467,6 +476,9 @@ public:
   }
 
   auto can_player_join() const noexcept -> bool {
+    std::cout << std::format("{} | {} ? {}", static_cast<int>(state),
+                             current_players, max_players)
+              << std::endl;
     return state == RoomState::WaitingForStart && current_players < max_players;
   }
 
