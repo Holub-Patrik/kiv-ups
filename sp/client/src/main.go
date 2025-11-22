@@ -47,6 +47,8 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 		host := ctx.State.ServerIP
 		port := ctx.State.ServerPort
 		ctx.StateMutex.RUnlock()
+		fmt.Println(ctx.State.ServerIP, ctx.State.ServerPort)
+		fmt.Println("ConfirmBtn: ", host, port)
 		ctx.UserInputChan <- EvtConnect{Host: host, Port: port}
 
 	case "Connecting_CancelBtn":
@@ -54,9 +56,12 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 
 	case "RoomSelect_BackBtn":
 		ctx.UserInputChan <- EvtBackToMain{}
-		ctx.StateMutex.Lock()
-		ctx.State.Screen = ScreenMainMenu
-		ctx.StateMutex.Unlock()
+
+	case "Game_Ready":
+		ctx.UserInputChan <- EvtGameAction{Action: "RDY1"}
+
+	case "Game_Check":
+		ctx.UserInputChan <- EvtGameAction{Action: "CHCK"}
 
 	default:
 		after, found := strings.CutPrefix(event.SourceID, "join_")
@@ -79,10 +84,10 @@ func main() {
 
 	rl.SetTargetFPS(60)
 
-	ctx := *initProgCtx()
+	ctx := initProgCtx()
 
 	// Start the "Game Thread"
-	go gameThread(&ctx)
+	go gameThread(ctx)
 
 	elementsToDraw := make([]UIElement, 0)
 
@@ -123,10 +128,12 @@ func main() {
 			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
 
 		case ScreenRoomSelect:
-			roomSelect := UIElement{dirty: true, component: buildRoomSelectUI(&ctx)}
+			roomSelect := buildRoomSelectUI(ctx)
 			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, roomSelect)
 
 		case ScreenInGame:
+			gameScreen := buildGameScreen(ctx)
+			elementsToDraw = append(elementsToDraw, gameScreen)
 		}
 
 		// calculate popups everytime
@@ -159,7 +166,7 @@ func main() {
 
 		close(uiEventChannel)
 		for event := range uiEventChannel {
-			handleUIEvent(&ctx, event)
+			handleUIEvent(ctx, event)
 		}
 	}
 

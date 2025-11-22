@@ -1,5 +1,8 @@
 wayland:
-	go build -v -tags wayland,noaudio
+	go build -C src -o ../poker-client -v -tags wayland,noaudio
 
 x11:
-	go build -v -tags x11,noaudio
+	go build -C src -o ../poker-client -v -tags x11,noaudio
+
+windows:
+	CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 go build -C src -a -v -ldflags "-s -w" -tags noaudio -o ../poker-client.exe

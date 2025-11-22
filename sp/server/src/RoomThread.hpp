@@ -349,6 +349,8 @@ private:
           {"CDTP", std::format("{:02}", c1)});
       ctx.info_ptr->msg_out_writer.wait_and_insert(
           {"CDTP", std::format("{:02}", c2)});
+
+      std::cout << std::format("Sending hand: [{}|{}]", c1, c2) << std::endl;
     }
 
     prepare_new_betting_round();

@@ -24,11 +24,10 @@ constexpr std::size_t TIMEOUT_DISCONNECT = 5000;
 
 struct usr_args {
   std::uint16_t port;
-  std::uint32_t ip;
 };
 
 auto parse_args(std::vector<std::string> args) -> std::optional<usr_args> {
-  struct usr_args ret{0, 0};
+  struct usr_args ret{0};
 
   try {
     unsigned long usr_part = std::stoul(args[0]);
@@ -42,19 +41,11 @@ auto parse_args(std::vector<std::string> args) -> std::optional<usr_args> {
     return std::nullopt;
   }
 
-  try {
-    unsigned long usr_part = std::stoul(args[1]);
-    std::uint32_t ip = static_cast<std::uint32_t>(usr_part);
-    ret.ip = ip;
-  } catch (std::exception e) {
-    return std::nullopt;
-  }
-
   return ret;
 }
 
 auto main(int argc, char* argv[]) -> int {
-  if (argc <= 2) {
+  if (argc <= 1) {
     std::cout << "Not enough arguments." << std::endl;
     return EXIT_FAILURE;
   }

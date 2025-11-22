@@ -71,43 +71,60 @@ func buildConnectingScreen(ctx *ProgCtx) UIElement {
 	return UIElement{dirty: true, component: connectingBounds}
 }
 
-// TODO Put more state info into GameState which I will connect here
 func buildGameScreen(ctx *ProgCtx) UIElement {
-	_ = ctx
+	ctx.StateMutex.RLock()
+	defer ctx.StateMutex.RUnlock()
 
 	screen := w.NewGameScreen(10)
-	screenPanel := w.NewPanelComponent(rl.DarkGreen, screen)
-	screen.AddPlayerCard(buildPlayerCard())
+	screenPanel := w.NewPanelComponent(rl.Color{R: 20, G: 80, B: 40, A: 255}, screen) // Felt Green
 
-	foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 150, 50)
-	betBtn := w.NewButtonComponent("Game_Bet", "Fold", 150, 50)
-	checkBtn := w.NewButtonComponent("Game_Check", "Fold", 150, 50)
-	leaveBtn := w.NewButtonComponent("Game_Leave", "Fold", 150, 50)
+	// 1. Render Community Cards (River)
+	screen.ResetRiver()
+	for _, card := range ctx.State.Table.CommunityCards {
+		screen.AddRiverCard(buildCardComponent(card.Symbol, rl.RayWhite))
+	}
 
+	// 2. Render My Hand
+	// Note: GameScreen struct in your code only had AddPlayerCard (singular).
+	// You might need to loop this or wrap them in an HStack if GameScreen supports it.
+	// Assuming we add them to the player bar.
+
+	myHandStack := w.NewHStack(5)
+	for _, card := range ctx.State.Table.MyHand {
+		myHandStack.AddChild(buildCardComponent(card.Symbol, rl.Gold))
+	}
+	screen.AddPlayerCard(myHandStack) // Adding the whole stack as one component
+
+	readyBtn := w.NewButtonComponent("Game_Ready", "Ready", 100, 50)
+	foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
+	checkBtn := w.NewButtonComponent("Game_Check", "Check", 100, 50)
+	callBtn := w.NewButtonComponent("Game_Call", "Call", 100, 50)
+
+	// Bet needs a way to input amount, for now just a generic button
+	betBtn := w.NewButtonComponent("Game_Bet", "Bet 100", 100, 50)
+
+	screen.AddActionButton(readyBtn)
 	screen.AddActionButton(foldBtn)
-	screen.AddActionButton(betBtn)
 	screen.AddActionButton(checkBtn)
-	screen.AddActionButton(leaveBtn)
+	screen.AddActionButton(callBtn)
+	screen.AddActionButton(betBtn)
 
 	return UIElement{dirty: true, component: screenPanel}
 }
 
-func buildPlayerCard( /*Insert Player Info Here*/ ) w.RGComponent {
-	player := w.NewVStack(5)
-	playerPanel := w.NewPanelComponent(rl.DarkBlue, player)
+// Helper to make a Card UI
+func buildCardComponent(text string, color rl.Color) w.RGComponent {
+	// A white card with text
+	lbl := w.NewCenterComponent(w.NewLabelComponent(text, 20, rl.Black))
+	cardPanel := w.NewPanelComponent(color, lbl)
 
-	playerName := w.NewLabelComponent("TestPlayer", 12, rl.RayWhite)
-	// eventually have to change to TextBox which will never be editable
-	tokenLabel := w.NewLabelComponent("10_000", 12, rl.RayWhite)
-	statusLabel := w.NewLabelComponent("Connected", 12, rl.RayWhite)
-	player.AddChild(playerName)
-	player.AddChild(tokenLabel)
-	player.AddChild(statusLabel)
-
-	return playerPanel
+	// Fixed size card
+	// In RayGUI/Raylib-go we often calculate bounds dynamically,
+	// but we can wrap it in a BoundsBox if we want fixed aspect ratio
+	return w.NewBoundsBox(0.8, 0.8, cardPanel)
 }
 
-func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
+func buildRoomSelectUI(ctx *ProgCtx) UIElement {
 	roomList := w.NewVStack(5)
 	roomList.AddChild(w.NewLabelComponent("Select a Room", 24, rl.White))
 
@@ -144,5 +161,5 @@ func buildRoomSelectUI(ctx *ProgCtx) w.RGComponent {
 	roomListPanel := w.NewPanelComponent(rl.DarkBlue, roomList)
 	roomBoundsBox := w.NewBoundsBox(0.4, 0.6, roomListPanel)
 
-	return roomBoundsBox
+	return UIElement{dirty: true, component: roomBoundsBox}
 }

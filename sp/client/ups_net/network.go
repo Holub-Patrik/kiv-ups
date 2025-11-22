@@ -58,8 +58,8 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 
 	fmt.Println("NetHandler: Success")
 	nh.conn = maybe_conn
-	nh.msgIn = make(chan NetMsg)
-	nh.msgOut = make(chan NetMsg)
+	nh.msgIn = make(chan NetMsg, chanBufSize)
+	nh.msgOut = make(chan NetMsg, chanBufSize)
 
 	go nh.sendMessages()
 	acceptor := MsgAcceptor{
@@ -217,9 +217,8 @@ func (self *MsgAcceptor) AcceptMessages() {
 			}
 
 			if results.parser_done {
-				fmt.Println("Parsed correct message, sending out")
+				fmt.Println("Parsed correct message\nCode:", results.code, "\nPayload:", results.payload)
 				self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
-				fmt.Println("Sent out")
 				parser.ResetParser()
 			}
 

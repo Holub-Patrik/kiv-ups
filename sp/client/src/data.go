@@ -24,6 +24,27 @@ type Room struct {
 	MaxPlayers     int // small int (2B)
 }
 
+type Card struct {
+	ID     int
+	Symbol string
+	Hidden bool
+}
+
+type PlayerData struct {
+	Name      string
+	ChipCount int
+	Status    string
+}
+
+type PokerTable struct {
+	MyHand         []Card
+	CommunityCards []Card
+
+	Pot     int
+	MyTurn  bool
+	Players map[int]PlayerData
+}
+
 type GameState struct {
 	Screen       UIScreen
 	Rooms        map[int]Room
@@ -31,9 +52,16 @@ type GameState struct {
 
 	ServerIP   string
 	ServerPort string
+
+	Table PokerTable
 }
 
 type UserInputEvent any
+
+type EvtGameAction struct {
+	Action string // "FOLD", "CALL", "BETT", "CHCK"
+	Amount string // For betting
+}
 
 type EvtConnect struct {
 	Host string
