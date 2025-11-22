@@ -48,14 +48,14 @@ func (gs *GameScreen) Calculate(bounds rl.Rectangle) {
 
 	playerBounds := rl.Rectangle{
 		X:      bounds.X + padding,
-		Y:      bounds.Y + padding + actionBarHeight + padding,
+		Y:      riverBounds.Y + riverBarHeight + padding,
 		Width:  bounds.Width - padding*2,
 		Height: playerBarHeight,
 	}
 
 	actionBounds := rl.Rectangle{
 		X:      bounds.X + padding,
-		Y:      bounds.Y + padding + riverBarHeight + padding + playerBarHeight + padding,
+		Y:      playerBounds.Y + playerBarHeight + padding,
 		Width:  bounds.Width - padding*2,
 		Height: actionBarHeight,
 	}
@@ -68,6 +68,7 @@ func (gs *GameScreen) Calculate(bounds rl.Rectangle) {
 func (gs *GameScreen) Draw(eventChannel chan<- UIEvent) {
 	gs.playerBar.Draw(eventChannel)
 	gs.actionBar.Draw(eventChannel)
+	gs.riverBar.Draw(eventChannel)
 }
 
 func (gs *GameScreen) ResetRiver() {

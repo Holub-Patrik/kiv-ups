@@ -59,6 +59,8 @@ private:
       player.accept_messages();
 
       auto msg_opt = player.msg_in_reader.read();
+      std::cout << (msg_opt ? "Read a message" : "No message read")
+                << std::endl;
       if (!msg_opt) {
         break; // No more messages
       }

@@ -363,6 +363,7 @@ private:
       u8 c = deck.draw();
       community_cards.push_back(c);
       broadcast("CRVR", std::format("{:02}", c));
+      std::cout << "River card: " << c << std::endl;
     }
 
     prepare_new_betting_round();

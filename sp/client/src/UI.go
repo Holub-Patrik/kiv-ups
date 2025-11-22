@@ -89,11 +89,9 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	// You might need to loop this or wrap them in an HStack if GameScreen supports it.
 	// Assuming we add them to the player bar.
 
-	myHandStack := w.NewHStack(5)
 	for _, card := range ctx.State.Table.MyHand {
-		myHandStack.AddChild(buildCardComponent(card.Symbol, rl.Gold))
+		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
 	}
-	screen.AddPlayerCard(myHandStack) // Adding the whole stack as one component
 
 	readyBtn := w.NewButtonComponent("Game_Ready", "Ready", 100, 50)
 	foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
@@ -112,15 +110,10 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	return UIElement{dirty: true, component: screenPanel}
 }
 
-// Helper to make a Card UI
 func buildCardComponent(text string, color rl.Color) w.RGComponent {
-	// A white card with text
 	lbl := w.NewCenterComponent(w.NewLabelComponent(text, 20, rl.Black))
 	cardPanel := w.NewPanelComponent(color, lbl)
 
-	// Fixed size card
-	// In RayGUI/Raylib-go we often calculate bounds dynamically,
-	// but we can wrap it in a BoundsBox if we want fixed aspect ratio
 	return w.NewBoundsBox(0.8, 0.8, cardPanel)
 }
 

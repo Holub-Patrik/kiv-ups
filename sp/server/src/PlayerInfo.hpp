@@ -4,8 +4,6 @@
 #include "MessageSerde.hpp"
 #include "SockWrapper.hpp"
 
-#include <algorithm>
-
 constexpr std::size_t MSG_BATCH_SIZE = 10;
 constexpr int MAX_CONSECUTIVE_ERRORS = 3;
 constexpr int MAX_FAST_FORWARD_BYTES = 100;
@@ -24,6 +22,9 @@ private:
   CB::Buffer<Net::MsgStruct, 128> msg_in;
   CB::Buffer<Net::MsgStruct, 128> msg_out;
 
+  CB::Reader<Net::MsgStruct, 128> msg_in_writer;
+  CB::Reader<Net::MsgStruct, 128> msg_out_reader;
+
 public:
   // created when remote sock is accepted, thus it should be false by default
   bool disconnected = false;
@@ -39,10 +40,10 @@ public:
   virtual ~PlayerInfo() {}
 
   PlayerInfo(const ServerSocket& server_sock)
-      : sock(server_sock), msg_in_reader(msg_in), msg_out_writer(msg_out) {}
+      : sock(server_sock), msg_in_reader(msg_in), msg_in_writer(msg_in),
+        msg_out_reader(msg_out), msg_out_writer(msg_out) {}
 
   auto accept_messages() -> void {
-    CB::Writer out{msg_in};
     std::array<char, 256> byte_buf{0};
 
     for (std::size_t i = 0; i < MSG_BATCH_SIZE; i++) {
@@ -57,7 +58,7 @@ public:
       } else if (bytes_read < 0) { // No data or error
         break;
       }
-      // std::cout << "Recieved: " << bytes_read << std::endl;
+      std::cout << "Recieved: " << bytes_read << std::endl;
 
       usize total_parsed_bytes = 0;
       Net::Serde::ParseResults results{};
@@ -116,7 +117,14 @@ public:
         if (results.parser_done) {
           // Valid message received, reset error counter
           invalid_msg_count = 0;
-          out.wait_and_insert(Net::MsgStruct{results.code, results.payload});
+          std::cout << std::format("Msg parsed -> Code: {}", results.code,
+                                   results.payload.has_value()
+                                       ? " | Payload: {}" +
+                                             results.payload.value()
+                                       : "")
+                    << std::endl;
+          msg_out_writer.wait_and_insert(
+              Net::MsgStruct{results.code, results.payload});
           parser.reset_parser();
         }
 
@@ -126,9 +134,8 @@ public:
   }
 
   auto send_messages() -> void {
-    CB::Reader in{msg_out};
     for (std::size_t i = 0; i < MSG_BATCH_SIZE; i++) {
-      const auto& maybe_msg = in.read();
+      const auto& maybe_msg = msg_out_reader.read();
       if (maybe_msg) {
         const auto& msg = maybe_msg.value();
         const auto& msg_str = msg.to_string();

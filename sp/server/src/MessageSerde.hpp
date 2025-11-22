@@ -300,7 +300,6 @@ public:
   }
 
   struct ParseResults parse_bytes(const str_v& byte_view) {
-    std::cout << "Parsing start" << std::endl;
     struct ParseResults res{};
     usize i = 0;
 
@@ -336,7 +335,6 @@ public:
     }
 
     res.bytes_parsed = i;
-    std::cout << "Parsing end" << std::endl;
     return res;
   }
 };
