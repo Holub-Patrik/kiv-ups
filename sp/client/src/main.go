@@ -110,7 +110,7 @@ func main() {
 	rl.InitWindow(screenWidth, screenHeight, "Test client")
 	defer rl.CloseWindow()
 
-	rl.SetTargetFPS(60)
+	// rl.SetTargetFPS(60)
 
 	ctx := initProgCtx()
 
@@ -157,11 +157,17 @@ func main() {
 
 		case ScreenRoomSelect:
 			roomSelect := buildRoomSelectUI(ctx)
-			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, roomSelect)
+			roomSelect.component.Rebuild(ctx.UI.RoomSelect.component)
+			ctx.UI.RoomSelect = roomSelect
+
+			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.RoomSelect)
 
 		case ScreenInGame:
 			gameScreen := buildGameScreen(ctx)
-			elementsToDraw = append(elementsToDraw, gameScreen)
+			gameScreen.component.Rebuild(ctx.UI.Game.component)
+			ctx.UI.Game = gameScreen
+
+			elementsToDraw = append(elementsToDraw, ctx.UI.Game)
 		}
 
 		// calculate popups everytime

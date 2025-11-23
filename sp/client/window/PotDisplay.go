@@ -36,3 +36,6 @@ func (p *PotDisplayComponent) Draw(eventChannel chan<- UIEvent) {
 }
 
 func (p *PotDisplayComponent) GetBounds() rl.Rectangle { return p.bounds }
+
+func (p *PotDisplayComponent) Rebuild(old RGComponent) { /* noop since no children and no persistant data */
+}

@@ -75,3 +75,7 @@ func (p *PlayerInfoComponent) Draw(eventChannel chan<- UIEvent) {
 func (p *PlayerInfoComponent) GetBounds() rl.Rectangle {
 	return p.bounds
 }
+
+func (p *PlayerInfoComponent) Rebuild(old RGComponent) {
+	/* noop since threre is no child and no persistent state */
+}

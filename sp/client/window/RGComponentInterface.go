@@ -20,4 +20,5 @@ type RGComponent interface {
 	Draw(eventChannel chan<- UIEvent)
 	Calculate(bounds rl.Rectangle)
 	GetBounds() rl.Rectangle
+	Rebuild(oldComponent RGComponent)
 }

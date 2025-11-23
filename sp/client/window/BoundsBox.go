@@ -49,3 +49,13 @@ func (b *BoundsBox) Calculate(bounds rl.Rectangle) {
 func (b *BoundsBox) Draw(eventChannel chan<- UIEvent) {
 	b.child.Draw(eventChannel)
 }
+
+func (b *BoundsBox) Rebuild(old RGComponent) {
+	if old == nil {
+		return
+	}
+
+	if oldBB, ok := old.(*BoundsBox); ok {
+		b.child.Rebuild(oldBB.child)
+	}
+}

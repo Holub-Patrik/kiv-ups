@@ -40,3 +40,13 @@ func (t *TextBoxComponent) Draw(eventChannel chan<- UIEvent) {
 func (t *TextBoxComponent) GetBounds() rl.Rectangle {
 	return t.bounds
 }
+
+func (t *TextBoxComponent) Rebuild(old RGComponent) {
+	if old == nil {
+		return
+	}
+
+	if oldTBC, ok := old.(*TextBoxComponent); ok {
+		t.editMode = oldTBC.editMode
+	}
+}

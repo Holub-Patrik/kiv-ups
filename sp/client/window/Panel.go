@@ -33,3 +33,13 @@ func (p *PanelComponent) GetBounds() rl.Rectangle {
 func (p *PanelComponent) SetChild(child RGComponent) {
 	p.child = child
 }
+
+func (p *PanelComponent) Rebuild(old RGComponent) {
+	if old == nil {
+		return
+	}
+
+	if oldPC, ok := old.(*PanelComponent); ok {
+		p.child.Rebuild(oldPC.child)
+	}
+}

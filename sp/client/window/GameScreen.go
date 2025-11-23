@@ -80,3 +80,13 @@ func (gs *GameScreen) Draw(eventChannel chan<- UIEvent) {
 }
 
 func (gs *GameScreen) GetBounds() rl.Rectangle { return gs.bounds }
+
+func (gs *GameScreen) Rebuild(old RGComponent) {
+	if old == nil {
+		return
+	}
+
+	if oldGS, ok := old.(*GameScreen); ok {
+		gs.actionBar.Rebuild(oldGS.actionBar)
+	}
+}

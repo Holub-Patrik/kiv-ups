@@ -51,3 +51,13 @@ func (c *CenterComponent) GetBounds() rl.Rectangle {
 func (c *CenterComponent) SetChild(child RGComponent) {
 	c.child = child
 }
+
+func (c *CenterComponent) Rebuild(old RGComponent) {
+	if old == nil {
+		return
+	}
+
+	if oldCC, ok := old.(*CenterComponent); ok {
+		c.child.Rebuild(oldCC.child)
+	}
+}

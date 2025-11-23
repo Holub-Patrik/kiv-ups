@@ -40,3 +40,7 @@ func (b *ButtonComponent) Draw(eventChannel chan<- UIEvent) {
 func (b *ButtonComponent) GetBounds() rl.Rectangle {
 	return b.bounds
 }
+
+func (b *ButtonComponent) Rebuild(old RGComponent) {
+	/* noop since this is true leaf node*/
+}

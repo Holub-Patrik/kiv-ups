@@ -64,3 +64,17 @@ func (s *VStack) Draw(eventChannel chan<- UIEvent) {
 		child.Draw(eventChannel)
 	}
 }
+
+func (s *VStack) Rebuild(old RGComponent) {
+	if old == nil {
+		return
+	}
+
+	if oldS, ok := old.(*VStack); ok {
+		for i, child := range s.children {
+			if i < len(oldS.children) {
+				child.Rebuild(oldS.children[i])
+			}
+		}
+	}
+}

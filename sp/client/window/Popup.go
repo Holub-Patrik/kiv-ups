@@ -70,3 +70,7 @@ func (p *TimedPopup) Draw(eventChannel chan<- UIEvent) {
 func (p *TimedPopup) GetBounds() rl.Rectangle {
 	return p.bounds
 }
+
+func (p *TimedPopup) Rebuild(old RGComponent) {
+	/* noop popups don't hold persistant data */
+}

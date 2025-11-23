@@ -93,6 +93,7 @@ type UIStore struct {
 	MainMenu     UIElement
 	ServerSelect UIElement
 	Connecting   UIElement
+	RoomSelect   UIElement
 	Game         UIElement
 }
 

@@ -65,3 +65,17 @@ func (s *HStack) Draw(eventChannel chan<- UIEvent) {
 		child.Draw(eventChannel)
 	}
 }
+
+func (s *HStack) Rebuild(old RGComponent) {
+	if old == nil {
+		return
+	}
+
+	if oldS, ok := old.(*HStack); ok {
+		for i, child := range s.children {
+			if i < len(oldS.children) {
+				child.Rebuild(oldS.children[i])
+			}
+		}
+	}
+}
