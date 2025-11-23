@@ -34,26 +34,32 @@ type PlayerData struct {
 	Name      string
 	ChipCount int
 	Status    string
+	RoundBet  int // how much each player bet
+	Cards     []Card
+	IsMyTurn  bool
 }
 
 type PokerTable struct {
 	MyHand         []Card
 	CommunityCards []Card
 
-	Pot     int
-	MyTurn  bool
-	Players map[int]PlayerData
+	Pot      int
+	RoundBet int // per round bet total, added to pot
+	MyTurn   bool
+	Players  map[int]PlayerData
 }
 
 type GameState struct {
-	Screen       UIScreen
-	Rooms        map[int]Room
+	Screen UIScreen
+	Rooms  map[int]Room
+
 	IsConnecting bool
 
 	ServerIP   string
 	ServerPort string
 
-	Table PokerTable
+	Table     PokerTable
+	BetAmount string
 }
 
 type UserInputEvent any

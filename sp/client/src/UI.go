@@ -76,37 +76,56 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	defer ctx.StateMutex.RUnlock()
 
 	screen := w.NewGameScreen(10)
-	screenPanel := w.NewPanelComponent(rl.Color{R: 20, G: 80, B: 40, A: 255}, screen) // Felt Green
+	screenPanel := w.NewPanelComponent(rl.Color{R: 20, G: 80, B: 40, A: 255}, screen)
 
-	// 1. Render Community Cards (River)
+	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.RoundBet)
+	screen.SetPotDisplay(pot)
+
 	screen.ResetRiver()
 	for _, card := range ctx.State.Table.CommunityCards {
 		screen.AddRiverCard(buildCardComponent(card.Symbol, rl.RayWhite))
 	}
 
-	// 2. Render My Hand
-	// Note: GameScreen struct in your code only had AddPlayerCard (singular).
-	// You might need to loop this or wrap them in an HStack if GameScreen supports it.
-	// Assuming we add them to the player bar.
+	screen.ResetOtherPlayers()
+	for id, player := range ctx.State.Table.Players {
+		if id == 0 {
+			continue
+		}
+		info := w.NewPlayerInfoComponent(player.Name, player.ChipCount, player.RoundBet, player.IsMyTurn)
+		for _, c := range player.Cards {
+			if c.Hidden {
+				info.AddCard(buildHiddenCardComponent())
+			} else {
+				info.AddCard(buildCardComponent(c.Symbol, rl.RayWhite))
+			}
+		}
+		screen.AddOtherPlayer(w.NewBoundsBox(0.18, 0.8, info))
+	}
 
+	screen.ResetRiver()
 	for _, card := range ctx.State.Table.MyHand {
 		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
 	}
-
 	readyBtn := w.NewButtonComponent("Game_Ready", "Ready", 100, 50)
-	foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
-	checkBtn := w.NewButtonComponent("Game_Check", "Check", 100, 50)
-	callBtn := w.NewButtonComponent("Game_Call", "Call", 100, 50)
-
-	// Bet needs a way to input amount, for now just a generic button
-	betBtn := w.NewButtonComponent("Game_Bet", "Bet 100", 100, 50)
-	leaveBtn := w.NewButtonComponent("Game_Leave", "Leave", 100, 50)
-
 	screen.AddActionButton(readyBtn)
-	screen.AddActionButton(foldBtn)
+
+	checkBtn := w.NewButtonComponent("Game_Check", "Check", 100, 50)
 	screen.AddActionButton(checkBtn)
+
+	foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
+	screen.AddActionButton(foldBtn)
+
+	betStack := w.NewHStack(0)
+	betBox := w.NewTextBoxComponent("Game_BetAmount", &ctx.State.BetAmount, 6)
+	betBtn := w.NewButtonComponent("Game_Bet", "Bet", 100, 50)
+	betStack.AddChild(betBtn)
+	betStack.AddChild(betBox)
+	screen.AddActionButton(betStack)
+
+	callBtn := w.NewButtonComponent("Game_Call", "Call", 100, 50)
 	screen.AddActionButton(callBtn)
-	screen.AddActionButton(betBtn)
+
+	leaveBtn := w.NewButtonComponent("Game_Leave", "Leave", 100, 50)
 	screen.AddActionButton(leaveBtn)
 
 	return UIElement{dirty: true, component: screenPanel}
@@ -114,9 +133,12 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 
 func buildCardComponent(text string, color rl.Color) w.RGComponent {
 	lbl := w.NewCenterComponent(w.NewLabelComponent(text, 20, rl.Black))
-	cardPanel := w.NewPanelComponent(color, lbl)
+	return w.NewPanelComponent(color, lbl)
+}
 
-	return w.NewBoundsBox(0.8, 0.8, cardPanel)
+func buildHiddenCardComponent() w.RGComponent {
+	lbl := w.NewCenterComponent(w.NewLabelComponent("??", 20, rl.White))
+	return w.NewPanelComponent(rl.Red, lbl)
 }
 
 func buildRoomSelectUI(ctx *ProgCtx) UIElement {

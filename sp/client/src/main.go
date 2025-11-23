@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	unet "poker-client/ups_net"
 	w "poker-client/window"
@@ -22,6 +24,7 @@ func initProgCtx() *ProgCtx {
 	ctx.StateMutex = sync.RWMutex{}
 	ctx.State.ServerIP = "127.0.0.1"
 	ctx.State.ServerPort = "8080"
+	ctx.State.BetAmount = ""
 
 	ctx.NetHandler = unet.NetHandler{}
 	ctx.Popup = NewPopupManager()
@@ -56,6 +59,28 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 
 	case "RoomSelect_BackBtn":
 		ctx.UserInputChan <- EvtBackToMain{}
+
+	case "Game_Bet":
+		ctx.StateMutex.RLock()
+		betStr := strings.TrimSpace(ctx.State.BetAmount)
+		ctx.StateMutex.RUnlock()
+
+		if betStr == "" {
+			ctx.Popup.AddPopup("Enter bet amount", time.Second*2)
+			return
+		}
+
+		amount, err := strconv.Atoi(betStr)
+		if err != nil || amount <= 0 {
+			ctx.Popup.AddPopup("Invalid amount (use numbers only)", time.Second*2)
+			return
+		}
+
+		ctx.StateMutex.Lock()
+		ctx.State.BetAmount = ""
+		ctx.StateMutex.Unlock()
+
+		ctx.UserInputChan <- EvtGameAction{Action: "BETT", Amount: fmt.Sprintf("%04d", amount)}
 
 	case "Game_Ready":
 		ctx.UserInputChan <- EvtGameAction{Action: "RDY1"}
