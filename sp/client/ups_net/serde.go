@@ -76,7 +76,7 @@ func (p *Parser) Init() {
 	p.payload = strings.Builder{}
 	p.code = strings.Builder{}
 	p.phase = Magic_1
-	p.msg_type = 'P'
+	p.msg_type = 'N'
 	p.size_index = 0
 	p.code_index = 0
 	p.payload_len = 0
@@ -86,7 +86,7 @@ func (p *Parser) ResetParser() {
 	p.payload.Reset()
 	p.code.Reset()
 	p.phase = Magic_1
-	p.msg_type = 'P'
+	p.msg_type = 'N'
 	p.size_index = 0
 	p.code_index = 0
 	p.payload_len = 0

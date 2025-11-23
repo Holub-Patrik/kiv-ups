@@ -39,6 +39,8 @@ private:
         }
 
         for (const auto& [p_idx, room_idx] : players_to_move) {
+          // flush all pending messages before moving to a room
+          players[p_idx]->flush_messages();
           rooms[room_idx]->accept_player(std::move(players[p_idx]));
           players.erase(players.begin() + p_idx);
         }
@@ -58,9 +60,8 @@ private:
     for (usize i = 0; i < MSG_BATCH_SIZE; i++) {
       player.accept_messages();
 
-      auto msg_opt = player.msg_in_reader.read();
-      std::cout << (msg_opt ? "Read a message" : "No message read")
-                << std::endl;
+      auto msg_opt = player.msg_client.reader.read();
+
       if (!msg_opt) {
         break; // No more messages
       }
@@ -77,7 +78,7 @@ private:
       case PlayerState::Connected:
         if (msg.code == "CONN") {
           std::cout << "Player sent CONN, sending 00OK\n";
-          player.msg_out_writer.wait_and_insert({"00OK", null});
+          player.msg_client.writer.wait_and_insert({"00OK", null});
           player.state = PlayerState::AwaitingRooms;
         }
         break;
@@ -103,7 +104,7 @@ private:
           const auto& maybe_id = Net::Serde::read_bg_int(msg.payload.value());
 
           if (!maybe_id) {
-            player.msg_out_writer.wait_and_insert({"FAIL", null});
+            player.msg_client.writer.wait_and_insert({"FAIL", null});
             // here I should dconn the player since he sent weird data
           }
 
@@ -113,7 +114,7 @@ private:
             const auto& room = *rooms[i];
             if (room.id == req_id) {
               if (!room.can_player_join()) {
-                player.msg_out_writer.wait_and_insert({"FAIL", null});
+                player.msg_client.writer.wait_and_insert({"FAIL", null});
                 break;
               } else {
                 room_exists = true;
@@ -141,11 +142,11 @@ private:
       std::string room_payload = room.to_payload_string();
 
       std::cout << "Sending room: " << room.name << "\n";
-      player.msg_out_writer.wait_and_insert({"ROOM", room_payload});
+      player.msg_client.writer.wait_and_insert({"ROOM", room_payload});
       player.room_send_index++;
     } else {
       std::cout << "Done sending rooms, sending DONE\n";
-      player.msg_out_writer.wait_and_insert({"DONE", null});
+      player.msg_client.writer.wait_and_insert({"DONE", null});
       player.state = PlayerState::AwaitingJoin;
     }
   }

@@ -112,6 +112,7 @@ func (nh *NetHandler) sendMessages() {
 
 	msg_builder := strings.Builder{}
 	for msg := range nh.msgOut {
+		fmt.Println("NetHandler: Sending ->", msg.Code, msg.Payload)
 		byte_msg := []byte(msg.ToStringWithBuilder(&msg_builder))
 		_, err := nh.conn.Write(byte_msg)
 
@@ -206,7 +207,7 @@ func (self *MsgAcceptor) AcceptMessages() {
 		results := ParseResults{}
 
 		for {
-			results = parser.ParseBytes(buffer[:bytes_read])
+			results = parser.ParseBytes(buffer[total_parsed_bytes:bytes_read])
 
 			if results.error_occured {
 				fmt.Println("Accepter Thread: Client sent goobledegook")
@@ -217,8 +218,13 @@ func (self *MsgAcceptor) AcceptMessages() {
 			}
 
 			if results.parser_done {
-				fmt.Println("Parsed correct message\nCode:", results.code, "\nPayload:", results.payload)
+				code_msg := ""
+				if results.payload != "" {
+					code_msg = "Payload: " + results.payload
+				}
+				fmt.Println("Parsed correct message <- Code:", results.code, code_msg)
 				self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
+				total_parsed_bytes += results.bytes_parsed
 				parser.ResetParser()
 			}
 

@@ -63,6 +63,9 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	case "Game_Check":
 		ctx.UserInputChan <- EvtGameAction{Action: "CHCK"}
 
+	case "Game_Leave":
+		ctx.UserInputChan <- EvtGameAction{Action: "GMLV"}
+
 	default:
 		after, found := strings.CutPrefix(event.SourceID, "join_")
 		if found {

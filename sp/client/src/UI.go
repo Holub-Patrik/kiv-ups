@@ -100,12 +100,14 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 
 	// Bet needs a way to input amount, for now just a generic button
 	betBtn := w.NewButtonComponent("Game_Bet", "Bet 100", 100, 50)
+	leaveBtn := w.NewButtonComponent("Game_Leave", "Leave", 100, 50)
 
 	screen.AddActionButton(readyBtn)
 	screen.AddActionButton(foldBtn)
 	screen.AddActionButton(checkBtn)
 	screen.AddActionButton(callBtn)
 	screen.AddActionButton(betBtn)
+	screen.AddActionButton(leaveBtn)
 
 	return UIElement{dirty: true, component: screenPanel}
 }

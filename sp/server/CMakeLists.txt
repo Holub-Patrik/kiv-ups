@@ -22,7 +22,7 @@ function(apply_common_settings TARGET)
         $<$<BOOL:${UBSAN}>:-fsanitize=undefined>
         $<$<BOOL:${TSAN}>:-fsanitize=thread>
         $<$<CONFIG:Debug>:-gdwarf-5>
-        $<$<CONFIG:Release>:-march=native>
+        $<$<CONFIG:Release>:-march=native -mtune=native>
         $<$<CONFIG:RelWithDebInfo>:-gdwarf-5>
     )
 

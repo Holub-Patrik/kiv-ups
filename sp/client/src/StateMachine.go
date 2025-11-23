@@ -160,9 +160,15 @@ func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState
 	switch evt := input.(type) {
 	case EvtGameAction:
 		// Translate UI clicks to Net Messages
+		fmt.Println("DFA: Sending Game Action ->", evt.Action, evt.Amount)
+		if evt.Action == "GMLV" {
+			fmt.Println("DFA: Returning to state lobby (GMLV)")
+			return &StateLobby{}
+		}
 		ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
 	case EvtBackToMain:
 		// Leave room logic
+		fmt.Println("DFA: Returning to state lobby (EvtBackToMain)")
 		return &StateLobby{} // Simplified
 	}
 	return nil
@@ -202,7 +208,9 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 
 	// we are being moved back into the lobby
 	case "GMDN":
-		return &StateLobby{}
+		ctx.State.Table.CommunityCards = nil
+		ctx.State.Table.MyHand = nil
+		ctx.State.Table.Pot = 0
 	}
 
 	return nil
