@@ -102,7 +102,6 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 		screen.AddOtherPlayer(w.NewBoundsBox(0.18, 0.8, info))
 	}
 
-	screen.ResetRiver()
 	for _, card := range ctx.State.Table.MyHand {
 		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
 	}

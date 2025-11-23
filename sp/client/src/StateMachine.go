@@ -12,8 +12,8 @@ func TranslateCardID(id int) string {
 		return "??"
 	}
 
-	ranks := []string{"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
-	suits := []string{"H", "D", "C", "S"}
+	ranks := []string{"2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace"}
+	suits := []string{"Hearts", "Diamonds", "Clubs", "Spades"}
 
 	suitIdx := id / 13
 	rankIdx := id % 13
@@ -22,7 +22,7 @@ func TranslateCardID(id int) string {
 		return "??"
 	}
 
-	return ranks[rankIdx] + "o" + suits[suitIdx]
+	return ranks[rankIdx] + " of " + suits[suitIdx]
 }
 
 type LogicState interface {
@@ -161,11 +161,11 @@ func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState
 	case EvtGameAction:
 		// Translate UI clicks to Net Messages
 		fmt.Println("DFA: Sending Game Action ->", evt.Action, evt.Amount)
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
 		if evt.Action == "GMLV" {
 			fmt.Println("DFA: Returning to state lobby (GMLV)")
 			return &StateLobby{}
 		}
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
 	case EvtBackToMain:
 		// Leave room logic
 		fmt.Println("DFA: Returning to state lobby (EvtBackToMain)")
