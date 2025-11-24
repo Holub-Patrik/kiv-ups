@@ -271,3 +271,28 @@ func ReadString(slice []byte) (string, bool) {
 
 	return string(stringSlice), true
 }
+
+func WriteSmallInt(num int) (string, bool) {
+	if num > 99 || num < 0 {
+		return "", false
+	}
+
+	return fmt.Sprintf("%02d", num), true
+}
+
+func WriteBigInt(num int) (string, bool) {
+	if num > 9999 || num < 0 {
+		return "", false
+	}
+
+	return fmt.Sprintf("%04d", num), true
+}
+
+func WriteString(str string) (string, bool) {
+	lenStr, ok := WriteBigInt(len(str))
+	if !ok {
+		return "", false
+	}
+
+	return lenStr + str, true
+}

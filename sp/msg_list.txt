@@ -96,10 +96,10 @@ Client: PKRNCHCK | PKRNFOLD | PKRNCALL | PKRNGMLV | PKRPBETT[BetAmount]
 - PKRNGMLV = Player sends that he leaving the game (His state should be retained. If his turn comes and he doesn't come back in time, his hand will be folded)
 - PKRPBETT[BetAmount] = Player is betting an amount. This has to be checked if he can do that. After that all players before him are reinserted into action queue
 
-Room: PKRNACOK | PKRNACFL | PKRNNYTN | PKRPCRVR[Card]
+Room: PKRNACOK | PKRNACFL | PKRNNYET | PKRPCRVR[Card]
 - PKRNACOK = Action is fine and has been executed
 - PKRNACFL = Action is not ok and player should retry
-- PKRNNYTN = Not your turn
+- PKRNNYET = Not your turn
 - PKRPCRVR[Card] = Card added to river
 
 --- Game Loop End ---
