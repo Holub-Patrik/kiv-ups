@@ -136,7 +136,7 @@ private:
         Msg::UPOK, Msg::UPFL, Msg::JOIN, Msg::JNOK, Msg::JNFL, Msg::RMST,
         Msg::STOK, Msg::STFL, Msg::RDY1, Msg::PRDY, Msg::GMST, Msg::CDTP,
         Msg::PTRN, Msg::CHCK, Msg::FOLD, Msg::CALL, Msg::BETT, Msg::ACOK,
-        Msg::ACFL, Msg::NYTN, Msg::SDWN, Msg::SDOK, Msg::SDFL, Msg::GMDN,
+        Msg::ACFL, Msg::NYET, Msg::SDWN, Msg::SDOK, Msg::SDFL, Msg::GMDN,
         Msg::DNOK, Msg::DNFL, Msg::DCON};
 
     return std::find(valid_codes.begin(), valid_codes.end(), code) !=
