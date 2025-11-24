@@ -27,3 +27,75 @@ template <typename T1, typename T2> using pair = std::pair<T1, T2>;
 template <typename T> using uq_ptr = std::unique_ptr<T>;
 
 constexpr std::nullopt_t null = std::nullopt;
+
+namespace Msg {
+// here so the comments can be next to messages
+#define cmp constexpr
+// Connection handshake (Client <-> Server)
+
+cmp str_v CONN = "CONN"; // Client: Conn with nick
+cmp str_v PNOK = "PNOK"; // Server: Player nick OK
+cmp str_v RCON = "RCON"; // Server: Ask reconnect
+cmp str_v FAIL = "FAIL"; // Server: Generic failure
+cmp str_v PINF = "PINF"; // Client: Send player info
+cmp str_v PIOK = "PIOK"; // Server: Player info OK
+
+// Room listing (Client <-> Server)
+cmp str_v RMRQ = "RMRQ"; // Client: Request room list
+cmp str_v ROOM = "ROOM"; // Server: Room info
+cmp str_v DONE = "DONE"; // Server: End of room list
+cmp str_v RMOK = "RMOK"; // Client: Room received OK
+cmp str_v RMFL = "RMFL"; // Client: Room received fail
+
+// Room updates (Server -> Client)
+cmp str_v RMUP = "RMUP"; // Server: Room update
+cmp str_v UPOK = "UPOK"; // Client: Update OK
+cmp str_v UPFL = "UPFL"; // Client: Update fail
+cmp str_v CRVR = "CRVR";
+
+// Join room (Client <-> Server)
+cmp str_v JOIN = "JOIN"; // Client: Join request
+cmp str_v JNOK = "JNOK"; // Server: Join OK
+cmp str_v JNFL = "JNFL"; // Server: Join failed
+
+// Room state sync (Server <-> Client)
+cmp str_v RMST = "RMST"; // Server: Room state
+cmp str_v STOK = "STOK"; // Client: State OK
+cmp str_v STFL = "STFL"; // Client: State fail
+
+// In-room actions (Client -> Room)
+cmp str_v RDY1 = "RDY1"; // Client: Player ready
+cmp str_v GMLV = "GMLV"; // Client: Leave room
+cmp str_v CHCK = "CHCK"; // Client: Check
+cmp str_v FOLD = "FOLD"; // Client: Fold
+cmp str_v CALL = "CALL"; // Client: Call
+cmp str_v BETT = "BETT"; // Client: Bet amount
+
+// In-room responses (Room -> Client)
+cmp str_v PRDY = "PRDY"; // Server: Player X ready broadcast
+cmp str_v GMST = "GMST"; // Server: Game started (room locked)
+cmp str_v CDTP = "CDTP"; // Server: Card to player (2 cards)
+cmp str_v PTRN = "PTRN"; // Server: Player X turn
+cmp str_v ACOK = "ACOK"; // Server: Action OK
+cmp str_v ACFL = "ACFL"; // Server: Action failed
+cmp str_v NYET = "NYET"; // Server: Not your turn
+
+// In-room responses (Client -> Room)
+cmp str_v CDOK = "CDOK";
+cmp str_v CDFL = "CDFL";
+
+// Showdown (Server -> Client)
+cmp str_v SDWN = "SDWN"; // Server: Showdown with all cards
+cmp str_v SDOK = "SDOK"; // Client: Showdown OK
+cmp str_v SDFL = "SDFL"; // Client: Showdown fail
+
+// Game end (Server -> Client)
+cmp str_v GMDN = "GMDN"; // Server: Winner info
+cmp str_v DNOK = "DNOK"; // Client: Done OK
+cmp str_v DNFL = "DNFL"; // Client: Done fail
+
+// Disconnect (Both directions)
+cmp str_v DCON = "DCON"; // Forceful disconnect
+
+#undef cmp
+} // namespace Msg

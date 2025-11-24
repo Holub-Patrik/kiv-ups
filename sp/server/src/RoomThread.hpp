@@ -37,17 +37,15 @@ public:
 };
 } // namespace GameUtils
 
-// Persistent data for a player slot (survives disconnects)
+// Persistent data for a player slot
 struct PlayerSeat {
   bool is_occupied = false;
   str nickname;
-  int chips = 1000; // Default buy-in
+  int chips = 1000;
   int current_bet = 0;
   bool is_folded = false;
   bool is_ready = false;
   vec<u8> hand;
-
-  // The active connection (nullptr if disconnected)
   PlayerInfo* connection = nullptr;
 
   void reset_round();
@@ -64,15 +62,12 @@ struct RoomContext {
   int dealer_idx = 0;
   RoundPhase round_phase = RoundPhase::PreFlop;
 
-  // Helpers
   int count_active_players() const;
-  void broadcast(const str& code, const opt<str>& payload);
-  void send_to(int seat_idx, const str& code, const opt<str>& payload);
+  void broadcast(const str_v& code, const opt<str>& payload);
+  void send_to(int seat_idx, const str_v& code, const opt<str>& payload);
 };
 
-// -----------------------------------------------------------
 // FSM Interface
-// -----------------------------------------------------------
 class RoomState {
 public:
   virtual ~RoomState() = default;
@@ -84,9 +79,7 @@ public:
   virtual str get_name() const = 0;
 };
 
-// -----------------------------------------------------------
-// Room Class (The Context)
-// -----------------------------------------------------------
+// Room Class
 class Room final {
 private:
   std::thread room_thread;
@@ -117,7 +110,6 @@ public:
   void accept_player(uq_ptr<PlayerInfo>&& p);
   str to_payload_string() const;
   bool can_player_join() const;
-
   void room_logic();
 
 private:
@@ -125,10 +117,7 @@ private:
   void process_network_io();
 };
 
-// -----------------------------------------------------------
-// Concrete States Classes
-// -----------------------------------------------------------
-
+// Concrete State Classes
 class LobbyState : public RoomState {
 public:
   void on_enter(Room& room, RoomContext& ctx) override;
@@ -149,7 +138,6 @@ public:
   str get_name() const override { return "Dealing"; }
 };
 
-// Handles Flop, Turn, and River card reveals
 class CommunityCardState : public RoomState {
 public:
   void on_enter(Room& room, RoomContext& ctx) override;

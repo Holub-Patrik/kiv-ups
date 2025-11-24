@@ -1,4 +1,5 @@
 #include "RoomThread.hpp"
+#include "Babel.hpp"
 
 namespace GameUtils {
 str Card::to_string() const { return std::format("{:02}", value); }
@@ -43,20 +44,20 @@ int RoomContext::count_active_players() const {
   return c;
 }
 
-void RoomContext::broadcast(const str& code, const opt<str>& payload) {
+void RoomContext::broadcast(const str_v& code, const opt<str>& payload) {
   for (auto& seat : seats) {
     if (seat.is_active()) {
-      seat.connection->msg_client.writer.wait_and_insert({code, payload});
+      seat.connection->msg_client.writer.wait_and_insert({str{code}, payload});
     }
   }
 }
 
-void RoomContext::send_to(int seat_idx, const str& code,
+void RoomContext::send_to(int seat_idx, const str_v& code,
                           const opt<str>& payload) {
   if (seat_idx >= 0 && seat_idx < ROOM_MAX_PLAYERS &&
       seats[seat_idx].is_active()) {
     seats[seat_idx].connection->msg_client.writer.wait_and_insert(
-        {code, payload});
+        {str{code}, payload});
   }
 }
 
@@ -129,16 +130,19 @@ void Room::process_incoming_players() {
   for (auto& p : incoming_queue) {
     bool seated = false;
 
+    // Try reconnect (player already has a seat but disconnected)
     for (auto& seat : ctx.seats) {
       if (seat.is_occupied && seat.nickname == p->nickname &&
           seat.connection == nullptr) {
-        std::cout << "Reconnect: " << p->nickname << " to seat." << std::endl;
+        std::cout << std::format("Reconnecting {} to seat\n", p->nickname);
         seat.connection = p.release();
+        seat.connection->state = PlayerState::InRoom;
         seated = true;
         break;
       }
     }
 
+    // Assign new seat
     if (!seated) {
       for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
         if (!ctx.seats[i].is_occupied) {
@@ -146,15 +150,19 @@ void Room::process_incoming_players() {
           ctx.seats[i].nickname = p->nickname;
           ctx.seats[i].connection = p.release();
           ctx.seats[i].chips = 1000;
+          ctx.seats[i].connection->state = PlayerState::InRoom;
           seated = true;
-          std::cout << "New Player: " << ctx.seats[i].nickname << " at seat "
-                    << i << std::endl;
+          std::cout << std::format("New player {} at seat {}\n",
+                                   ctx.seats[i].nickname, i);
           break;
         }
       }
     }
 
+    // If no seat available, return to main list
     if (!seated) {
+      std::cout << std::format("No seat for {}, returning to main list\n",
+                               p->nickname);
       std::lock_guard lg{return_mtx};
       return_arr.push_back(std::move(p));
     }
@@ -162,18 +170,29 @@ void Room::process_incoming_players() {
   incoming_queue.clear();
 }
 
+static bool is_valid_room_code(const str_v& code) {
+  static const arr<str_v, 20> valid_codes = {
+      Msg::RDY1, Msg::GMLV, Msg::CHCK, Msg::FOLD, Msg::CALL, Msg::BETT,
+      Msg::CDOK, Msg::CDFL, Msg::STOK, Msg::STFL, Msg::DNOK, Msg::DNFL};
+  return std::find(valid_codes.begin(), valid_codes.end(), code) !=
+         valid_codes.end();
+}
+
 void Room::process_network_io() {
   for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
     auto& seat = ctx.seats[i];
 
+    // Handle disconnections
     if (seat.is_occupied && seat.connection && seat.connection->disconnected) {
-      std::cout << "Player " << seat.nickname << " disconnected (seat " << i
-                << ")" << std::endl;
+      std::cout << std::format("Player {} disconnected (seat {})\n",
+                               seat.nickname, i);
       delete seat.connection;
       seat.connection = nullptr;
       seat.is_ready = false;
+      continue;
     }
 
+    // Process messages from active players
     if (seat.is_active()) {
       auto* p = seat.connection;
       p->accept_messages();
@@ -181,9 +200,9 @@ void Room::process_network_io() {
       while (const auto& msg_opt = p->msg_client.reader.read()) {
         const auto& msg = msg_opt.value();
 
-        // Global "Leave Room" Command
-        if (msg.code == "GMLV") {
-          std::cout << "Player leaving room entirely." << std::endl;
+        // Global leave command
+        if (msg.code == Msg::GMLV) {
+          std::cout << std::format("Player {} leaving room\n", seat.nickname);
           std::lock_guard lg{return_mtx};
           return_arr.emplace_back(std::unique_ptr<PlayerInfo>(p));
           seat.connection = nullptr;
@@ -192,6 +211,16 @@ void Room::process_network_io() {
           continue;
         }
 
+        // Validate message code
+        if (!is_valid_room_code(msg.code)) {
+          std::cerr << std::format(
+              "Unknown room message {} from {}, disconnecting\n", msg.code,
+              seat.nickname);
+          p->disconnected = true;
+          break;
+        }
+
+        // Route to current state
         if (current_state) {
           current_state->on_message(*this, ctx, i, msg);
         }
@@ -206,12 +235,11 @@ void Room::process_network_io() {
 
 void LobbyState::on_enter(Room& room, RoomContext& ctx) {
   std::cout << "State: Enter Lobby" << std::endl;
-  ctx.broadcast("GMLB", null);
 
   for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
     if (ctx.seats[i].is_occupied && ctx.seats[i].connection == nullptr) {
-      std::cout << "Cleanup: Removing disconnected player from seat " << i
-                << std::endl;
+      std::cout << std::format(
+          "Lobby cleanup: Removing disconnected player from seat {}\n", i);
       ctx.seats[i] = PlayerSeat{};
     } else {
       ctx.seats[i].reset_game();
@@ -230,8 +258,8 @@ void LobbyState::on_leave(Room& room, RoomContext& ctx) {
 void LobbyState::on_tick(Room& room, RoomContext& ctx) {
   for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
     if (ctx.seats[i].is_occupied && ctx.seats[i].connection == nullptr) {
-      std::cout << "Lobby Cleanup: Removing disconnected player from seat " << i
-                << std::endl;
+      std::cout << std::format(
+          "Lobby cleanup: Removing disconnected player from seat {}\n", i);
       ctx.seats[i] = PlayerSeat{};
     }
   }
@@ -245,22 +273,30 @@ void LobbyState::on_tick(Room& room, RoomContext& ctx) {
         ready_count++;
     }
   }
+
+  // Start game if all active players are ready (min 2 players)
   if (player_count >= 2 && ready_count == player_count) {
+    std::cout << std::format("All {} players ready, starting game\n",
+                             player_count);
     room.transition_to<DealingState>();
   }
 }
 
 void LobbyState::on_message(Room& room, RoomContext& ctx, int seat_idx,
                             const Net::MsgStruct& msg) {
-  if (msg.code == "RDY1") {
-    ctx.seats[seat_idx].is_ready = true;
-    ctx.broadcast("RDOK", Net::Serde::write_sm_int(seat_idx));
+  if (msg.code == Msg::RDY1) {
+    if (ctx.seats[seat_idx].is_active()) {
+      ctx.seats[seat_idx].is_ready = true;
+      ctx.broadcast(Msg::PRDY, Net::Serde::write_sm_int(seat_idx));
+      std::cout << std::format("Player {} ready\n",
+                               ctx.seats[seat_idx].nickname);
+    }
   }
 }
 
 void DealingState::on_enter(Room& room, RoomContext& ctx) {
   std::cout << "State: Enter Dealing" << std::endl;
-  ctx.broadcast("GMST", null);
+  ctx.broadcast(Msg::GMST, null); // Game starting
 
   ctx.round_phase = RoundPhase::PreFlop;
 
@@ -269,8 +305,9 @@ void DealingState::on_enter(Room& room, RoomContext& ctx) {
       u8 c1 = ctx.deck.draw();
       u8 c2 = ctx.deck.draw();
       ctx.seats[i].hand = {c1, c2};
-      ctx.send_to(i, "CDTP", std::format("{:02}", c1));
-      ctx.send_to(i, "CDTP", std::format("{:02}", c2));
+      ctx.send_to(i, Msg::CDTP, std::format("{:02}{:02}", c1, c2));
+      std::cout << std::format("Dealt cards to {}: {} {}\n",
+                               ctx.seats[i].nickname, (int)c1, (int)c2);
     }
   }
 }
@@ -282,10 +319,13 @@ void DealingState::on_tick(Room& room, RoomContext& ctx) {
 }
 
 void DealingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
-                              const Net::MsgStruct& msg) {}
+                              const Net::MsgStruct& msg) {
+  std::cerr << std::format("Unexpected message {} in Dealing state\n",
+                           msg.code);
+}
 
 void CommunityCardState::on_enter(Room& room, RoomContext& ctx) {
-  std::cout << "State: Revealing Cards" << std::endl;
+  std::cout << "State: Revealing Community Cards" << std::endl;
 
   int cards_to_draw = 0;
   if (ctx.round_phase == RoundPhase::PreFlop) {
@@ -302,8 +342,8 @@ void CommunityCardState::on_enter(Room& room, RoomContext& ctx) {
   for (int i = 0; i < cards_to_draw; ++i) {
     u8 c = ctx.deck.draw();
     ctx.community_cards.push_back(c);
-    ctx.broadcast("CRVR", std::format("{:02}", c));
-    std::cout << "Revealed Card: " << (int)c << std::endl;
+    ctx.broadcast(Msg::CRVR, std::format("{:02}", c));
+    std::cout << std::format("Revealed community card: {:d}\n", c);
   }
 }
 
@@ -314,7 +354,11 @@ void CommunityCardState::on_tick(Room& room, RoomContext& ctx) {
 }
 
 void CommunityCardState::on_message(Room& room, RoomContext& ctx, int seat_idx,
-                                    const Net::MsgStruct& msg) {}
+                                    const Net::MsgStruct& msg) {
+  // No messages expected during card reveal
+  std::cerr << std::format("Unexpected message {} in CommunityCard state\n",
+                           msg.code);
+}
 
 void BettingState::on_enter(Room& room, RoomContext& ctx) {
   std::cout << "State: Enter Betting" << std::endl;
@@ -328,7 +372,6 @@ void BettingState::on_enter(Room& room, RoomContext& ctx) {
   }
 
   int start_idx = (ctx.dealer_idx + 1) % ROOM_MAX_PLAYERS;
-
   for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
     int idx = (start_idx + i) % ROOM_MAX_PLAYERS;
     if (ctx.seats[idx].is_active() && !ctx.seats[idx].is_folded &&
@@ -359,19 +402,19 @@ void BettingState::start_next_turn(RoomContext& ctx) {
     return;
   }
 
-  std::cout << "Turn: Seat " << current_actor << std::endl;
-  ctx.broadcast("TURN", std::format("{:02}", current_actor));
+  std::cout << std::format("Turn: Seat {} ({})\n", current_actor,
+                           ctx.seats[current_actor].nickname);
+  ctx.broadcast(Msg::PTRN, Net::Serde::write_sm_int(current_actor));
 }
 
 void BettingState::requeue_others(RoomContext& ctx, int aggressor_idx) {
   action_queue.clear();
-
   int start_idx = (aggressor_idx + 1) % ROOM_MAX_PLAYERS;
 
   for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
     int idx = (start_idx + i) % ROOM_MAX_PLAYERS;
     if (idx == aggressor_idx)
-      continue; // Don't queue self
+      continue;
 
     if (ctx.seats[idx].is_active() && !ctx.seats[idx].is_folded) {
       action_queue.push_back(idx);
@@ -396,35 +439,32 @@ void BettingState::on_tick(Room& room, RoomContext& ctx) {
 void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
                               const Net::MsgStruct& msg) {
   if (seat_idx != current_actor) {
-    ctx.send_to(seat_idx, "ERR_", "Not your turn");
+    ctx.send_to(seat_idx, Msg::NYET, null);
     return;
   }
 
   auto& seat = ctx.seats[seat_idx];
   bool turn_completed = false;
 
-  if (msg.code == "FOLD") {
+  if (msg.code == Msg::FOLD) {
     seat.is_folded = true;
-    ctx.broadcast("FOLD", std::format("{:02}", seat_idx));
+    ctx.send_to(seat_idx, Msg::ACOK, Net::Serde::write_sm_int(seat_idx));
     turn_completed = true;
-  }
-
-  else if (msg.code == "CHCK") {
+    std::cout << std::format("Player {} folded\n", seat.nickname);
+  } else if (msg.code == Msg::CHCK) {
     if (current_high_bet > seat.current_bet) {
-      ctx.send_to(seat_idx, "ERR_", "Cannot Check, must Call or Fold");
+      ctx.send_to(seat_idx, Msg::ACFL, "Cannot check, must call");
     } else {
-      ctx.broadcast("CHCK", std::format("{:02}", seat_idx));
+      ctx.send_to(seat_idx, Msg::ACOK, Net::Serde::write_sm_int(seat_idx));
       turn_completed = true;
     }
-  }
-
-  else if (msg.code == "BETT") {
+  } else if (msg.code == Msg::BETT) {
     if (has_bet_occurred) {
-      ctx.send_to(seat_idx, "ERR_", "Cannot Raise (limit 1 bet/rnd)");
+      ctx.send_to(seat_idx, Msg::ACFL, "Cannot raise (limit 1 bet/round)");
+    } else if (!msg.payload) {
+      ctx.send_to(seat_idx, Msg::ACFL, "Bet amount required");
     } else {
-      // Let's assume fixed simple logic or parse payload
-      int amount = 100; // Default or parse from msg.payload
-
+      int amount = 100;
       if (msg.payload) {
         try {
           amount = std::stoi(msg.payload.value());
@@ -432,41 +472,28 @@ void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
         }
       }
 
-      if (seat.chips < amount) {
-        ctx.send_to(seat_idx, "ERR_", "Not enough chips");
-      } else {
-        current_high_bet = amount;
-        seat.current_bet = amount;
-        seat.chips -= amount;
-        ctx.pot += amount;
-        has_bet_occurred = true;
+      current_high_bet = amount;
+      seat.current_bet = amount;
+      seat.chips -= amount;
+      ctx.pot += amount;
+      has_bet_occurred = true;
 
-        ctx.broadcast("BETT", std::format("{:02}{:04}", seat_idx, amount));
-
-        requeue_others(ctx, seat_idx);
-        turn_completed = true;
-      }
-    }
-  }
-
-  else if (msg.code == "CALL") {
-    if (!has_bet_occurred && current_high_bet == 0) {
-      ctx.broadcast("CHCK", std::format("{:02}", seat_idx));
+      ctx.send_to(seat_idx, Msg::ACOK,
+                  std::format("{:02}{:04}", seat_idx, amount));
+      requeue_others(ctx, seat_idx);
       turn_completed = true;
-    } else {
-      int to_call = current_high_bet - seat.current_bet;
-      if (seat.chips < to_call) {
-        to_call = seat.chips;
-      }
-
+      std::cout << std::format("Player {} bets {}\n", seat.nickname, amount);
+    }
+  } else if (msg.code == Msg::CALL) {
+    int to_call = current_high_bet - seat.current_bet;
+    if (to_call > 0) {
       seat.chips -= to_call;
       seat.current_bet += to_call;
       ctx.pot += to_call;
-
-      ctx.broadcast("CALL",
-                    std::format("{:02}{:04}", seat_idx, seat.current_bet));
-      turn_completed = true;
     }
+    ctx.send_to(seat_idx, Msg::ACOK, Net::Serde::write_sm_int(seat_idx));
+    turn_completed = true;
+    std::cout << std::format("Player {} calls {}\n", seat.nickname, to_call);
   }
 
   if (turn_completed) {
@@ -476,7 +503,17 @@ void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
 
 void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
   std::cout << "State: Enter Showdown" << std::endl;
-  ctx.broadcast("GMDN", null);
+
+  str payload = Net::Serde::write_sm_int(ctx.count_active_players());
+  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
+    if (ctx.seats[i].is_active() && !ctx.seats[i].is_folded) {
+      payload += Net::Serde::write_sm_int(i);
+      payload +=
+          std::format("{:02}{:02}", ctx.seats[i].hand[0], ctx.seats[i].hand[1]);
+    }
+  }
+
+  ctx.broadcast(Msg::SDWN, payload);
 }
 
 void ShowdownState::on_leave(Room& room, RoomContext& ctx) {}
@@ -486,4 +523,7 @@ void ShowdownState::on_tick(Room& room, RoomContext& ctx) {
 }
 
 void ShowdownState::on_message(Room& room, RoomContext& ctx, int seat_idx,
-                               const Net::MsgStruct& msg) {}
+                               const Net::MsgStruct& msg) {
+  std::cerr << std::format("Unexpected message {} in Showdown state\n",
+                           msg.code);
+}
