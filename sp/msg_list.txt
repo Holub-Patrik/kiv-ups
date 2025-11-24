@@ -1,0 +1,104 @@
+General information:
+There are 2 types of communication
+
+Data <-> OK
+Request -> Loop(Data <-> OK)
+
+This means that there are strings of responses where response isn't expected to be OK, but another part of the request
+And then there is some information sending which is expected to be acknowledged by an ok. 
+- There has to be a timeout on the ok, and if the other side doesn't respond with ok, error has to be assumed and the connection reset
+
+Basic Data definition:
+SmallInt | 2 bytes | eg.: 1 => 01, 10 => 10, 99 => 99
+BigInt | 4 bytes | eg.: 1 => 0001, 103 => 0103, 9999 => 9999
+String = Length(BigInt) + Payload
+
+Everything else should de derived from this
+When sending structures over network, there must a clearly defined order of members being sent and what members are being sent.
+When sending partial updates, they should be handled per member.eg: 
+RoomUpdate = [RoomID][MemberID][NewValue]
+If the member is an array = [StructID][MemberID][ArrIdx][NewValue]
+
+Client: PKRPCONN[nick]
+- PKRPCONN[nick] = Player attempt to join the server
+
+Server: PKRNPNOK | PKRNRCON | PKRNFAIL
+- PKRNPNOK = Player Nick OK
+- PKRNRCON = PLayer Nick has been recognized in an active room so server asks if user wants to reconnect
+- PKRNFAIL = Fail, abrot communication
+
+Client: PKRPPINF[PlayerInfo] | PKRNRCON
+- PKRPPINF = Player Information sent to server (Client authorative since no DB)
+- PKRNRCON = Player response to reconnect to an active room -> Answer to this is PKRPRMST[RoomState][PlayerInfo]
+
+Server: PKRNPIOK | PKRPRMST[RoomState][PlayerInfo] | PKRNFAIL
+- PKRPNPIOK = Player Info OK, server waits for further requests from client
+- PKRPRMST[RoomState][PlayerInfo] = Room State for reconnection sends PlayerInfo so the client can sync up
+
+Client: PKRNRMRQ
+- PKRNRMRQ = Room Request from client
+
+Loop(Server: PKRPROOM | PKRNDONE <-> Client: PKRNRMOK | PKRNRMFL)
+- PKRPROOM[RoomState] = Server sends room info waits for PKRNRMOK|PKRNRMFL from client
+- PKRNDONE = Server has sent all the rooms waits for PKRNRMOK|PKRNRMFL from client
+- PKRNRMOK = Client has received correct room
+- PKRNRMFL = Client has received incorrect room
+
+Server: PKRPRMUP[RoomUpdate]
+- PKRPRMUP = Room Update Only partial information is required say Enum value what about the room has changed and then the new value
+
+Client: PKRNUPOK | PKRNUPFL
+- PKRNUPOK = Client has successfully read the update
+- PKRNUPFL = Client failed to read the update
+
+Client: PKRPJOIN[RoomID]
+- PKRPJOIN[RoomID] = Client Requests to join room with id RoomID
+
+Server: PKRNJNOK | PKRNJNFL
+- PKRNJNOK = Room is open and player has been moved into the room // This also means that game is in waiting for start
+- PKRNJNFL = Room is closed and player hasn't been moved
+
+Room: PKRPRMST[RoomState]
+- PKRPRMST[RoomState] = Room response when player joins. Information sent is info about the other players and which players are ready
+
+Client: PKRNSTOK | PKRNSTFL
+- PKRNSTOK = Client read correct room state
+- PKRNSTFL = Client failed to accept state, send them back
+
+Client: PKRNRDY! | PKRNGMLV
+- PKRNRDY! = Client sends information to room that they are ready for the game to begin
+- PKRNGMLV = Cliend is leaving the room. This can happen even if he is ready and his ready flag has to be cleared
+
+Room: Broadcast(PKRPPRDY[PlayerID])
+- PKRPPRDY[PlayerID] = Server broadcast who has sent the ready. This also works as an OK for the one who has sent PKRNRDY!
+
+--- When GameStart conditions are met ---
+
+Room: Broadcast(PKRNGMST)
+- PKRNGMST = Information that the room has been locked and game has started
+
+Room: PKRPCDTP[CardInformation][CardInformation]
+- PKRPCDTP = Each player receives 2 cards. Client can and should assume all other players have received 2 cards. (The values for showdown will be sent at the end
+
+Client: PKRNCDOK | PKRNCDFL
+- PKRNCDOK = Client response that he received both cards ok
+- PKRNCDFL = Client failed to parse cards
+
+Room: Broadcast(PKRPPTRN[PlayerID])
+- PKRPPTRN = Room information whose turn it is
+
+Client: PKRNCHCK | PKRNFOLD | PKRNCALL | PKRNGMLV | PKRPBETT[BetAmount] 
+- PKRNCHCK = Player sends that he wants to check
+- PKRNFOLD = Player sends that he is folding
+- PKRNCALL = Player sends that he is calling the bett
+- PKRNGMLV = Player sends that he leaving the game (His state should be retained. If his turn comes and he doesn't come back in time, his hand will be folded)
+- PKRPBETT[BetAmount] = Player is betting an amount. This has to be checked if he can do that. After that all players before him are reinserted into action queue
+
+Room: PKRNACOK | PKRNACFL | PKRNNYTN 
+- PKRNACOK = Action is fine and has been executed
+- PKRNACFL = Action is not ok and player should retry
+- PKRNNYTN = Not your turn
+
+Both: PKRNDCON (Optional, can be handled by close(socket))
+- PKRNDCON = Server forceful closing of the socket. Send this before so the client can react
+- PKRNDCON = Client disconnects message before closing socket. Allows server to do proper cleanup

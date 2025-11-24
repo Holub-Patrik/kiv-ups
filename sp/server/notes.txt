@@ -1,50 +1,5 @@
-Current Thread hierarchy
-- main server thread
--- spawns room process
-- room thread
--- client thread
---- msg thread
--- client thread
---- msg thread
-
-Player State
-- Taken Action
-- Tokens
-
-Game State Machine
-Round State Machine
-
-PN | (Raise? Pass? Skip?)
-Raise = Msg From Client
-Skip = Connection issues / Disconnect Msg
-Pass = Msg From Client / Result from Skip
-Fold = Msg From Client / Result from Skip
-
-(Pass Round)
-In case skip is executed
-- If connection issues are cause -> Execute pass
-- If disconnect is the cause -> Execute fold
-
-(Betting Round)
-In case skip is executed -> Execute fold
-
-P1 -> P2 -> P3 -> P4
-
-Within a round
-- If a bet is placed, that round is now Betting round
-- Betting round forces additional check at the end if everyone has placed a bet
-
-Maybe I just use a map
-unordered_map<string, function>
-function(const string& payload) -> std::variant<all options>
-Since I have the entire payload, I can use very easy substring operations to convert messsages to data
-
-Game Play
-1. Connect to a server
-2. List Rooms
-
-FIX
-\n is sent as a last character
-Needs to be trimmed off
-To ale pořád že musíš mít parser, kterej nepředpokládá že to co přečteš z recvfrom() je kompletní zpráva.
-Pořád to musí být parser jako mam vpravo, kterej jde byte po bytu
+PKRPCONN[nick]
+PKRNPNOK | PKRPRCON | PKRNFAIL
+- PKRNPNOK = Player Nick OK
+- PKRNRCON = Reconnect
+- 

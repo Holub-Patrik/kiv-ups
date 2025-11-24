@@ -27,7 +27,7 @@ constexpr auto wait_time = std::chrono::milliseconds(20);
 
 namespace CB {
 
-template <typename Type, std::size_t Size> struct Buffer {
+template <typename Type, usize Size> struct Buffer {
   arr<Type, Size> data;
   std::atomic<u64> read_pos = 0;
   std::atomic<u64> write_pos = 1;
@@ -39,7 +39,7 @@ template <typename Type, std::size_t Size> struct Buffer {
   auto advanced_pos(const auto& cur_pos) -> u64 { return (cur_pos + 1) % Size; }
 };
 
-template <typename Type, std::size_t Size> class Reader final {
+template <typename Type, usize Size> class Reader final {
 private:
   Buffer<Type, Size>& buffer;
 
@@ -51,9 +51,9 @@ public:
 
   void advance() const { buffer.advance_read(); }
 
-  std::optional<Type> read() const {
+  opt<Type> read() const {
     if (buffer.advanced_pos(buffer.read_pos) == buffer.write_pos) {
-      return std::nullopt;
+      return null;
     } else {
       buffer.advance_read();
       const auto& ret_val = buffer.data[buffer.read_pos];
@@ -72,7 +72,7 @@ public:
   }
 };
 
-template <typename Type, std::size_t Size> class Writer final {
+template <typename Type, usize Size> class Writer final {
 private:
   Buffer<Type, Size>& buffer;
 
@@ -99,12 +99,12 @@ public:
   }
 };
 
-template <typename Type, std::size_t Size> struct TwinBuffer {
+template <typename Type, usize Size> struct TwinBuffer {
   Buffer<Type, Size> buffer_one{};
   Buffer<Type, Size> buffer_two{};
 };
 
-template <typename Type, std::size_t Size> class Server final {
+template <typename Type, usize Size> class Server final {
 public:
   Reader<Type, Size> reader;
   Writer<Type, Size> writer;
@@ -113,7 +113,7 @@ public:
       : reader(twin_buf.buffer_one), writer(twin_buf.buffer_two) {}
 };
 
-template <typename Type, std::size_t Size> class Client final {
+template <typename Type, usize Size> class Client final {
 public:
   Reader<Type, Size> reader;
   Writer<Type, Size> writer;
