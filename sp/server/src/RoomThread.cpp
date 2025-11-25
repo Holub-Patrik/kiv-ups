@@ -28,6 +28,7 @@ void PlayerSeat::reset_round() { current_bet = 0; }
 void PlayerSeat::reset_game() {
   is_folded = false;
   is_ready = false;
+  showdowm_okay = false;
   current_bet = 0;
   hand.clear();
 }
@@ -76,8 +77,12 @@ Room::~Room() {
 }
 
 void Room::accept_player(uq_ptr<PlayerInfo>&& p) {
-  std::lock_guard g{incoming_mtx};
-  incoming_queue.emplace_back(std::move(p));
+  // TODO: implement room serialiazation
+  p->msg_client.writer.wait_and_insert({str{Msg::RMST}, "ToBeSpecified"});
+  {
+    std::lock_guard g{incoming_mtx};
+    incoming_queue.emplace_back(std::move(p));
+  }
 }
 
 str Room::to_payload_string() const {
@@ -171,9 +176,10 @@ void Room::process_incoming_players() {
 }
 
 static bool is_valid_room_code(const str_v& code) {
-  static const arr<str_v, 20> valid_codes = {
-      Msg::RDY1, Msg::GMLV, Msg::CHCK, Msg::FOLD, Msg::CALL, Msg::BETT,
-      Msg::CDOK, Msg::CDFL, Msg::STOK, Msg::STFL, Msg::DNOK, Msg::DNFL};
+  static const arr<str_v, 21> valid_codes = {
+      Msg::RDY1, Msg::GMLV, Msg::CHCK, Msg::FOLD, Msg::CALL,
+      Msg::BETT, Msg::CDOK, Msg::CDFL, Msg::STOK, Msg::STFL,
+      Msg::DNOK, Msg::DNFL, Msg::SDOK};
   return std::find(valid_codes.begin(), valid_codes.end(), code) !=
          valid_codes.end();
 }
@@ -519,11 +525,24 @@ void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
 void ShowdownState::on_leave(Room& room, RoomContext& ctx) {}
 
 void ShowdownState::on_tick(Room& room, RoomContext& ctx) {
-  room.transition_to<LobbyState>();
+  int count_players_accepted = 0;
+  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
+    if (ctx.seats[i].showdowm_okay) {
+      count_players_accepted++;
+    }
+  }
+
+  if (count_players_accepted == ctx.count_active_players()) {
+    ctx.broadcast(Msg::GMDN, null);
+    room.transition_to<LobbyState>();
+  }
 }
 
 void ShowdownState::on_message(Room& room, RoomContext& ctx, int seat_idx,
                                const Net::MsgStruct& msg) {
   std::cerr << std::format("Unexpected message {} in Showdown state\n",
                            msg.code);
+  if (msg.code == "SDOK") {
+    ctx.seats[seat_idx].showdowm_okay = true;
+  }
 }

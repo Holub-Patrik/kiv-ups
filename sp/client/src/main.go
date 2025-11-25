@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-func initProgCtx() *ProgCtx {
+func initProgCtx(nick string, chips int) *ProgCtx {
 	ctx := ProgCtx{}
 
 	ctx.UserInputChan = make(chan UserInputEvent, 10) // Buffered
@@ -25,6 +26,12 @@ func initProgCtx() *ProgCtx {
 	ctx.State.ServerIP = "127.0.0.1"
 	ctx.State.ServerPort = "8080"
 	ctx.State.BetAmount = ""
+
+	// Initialize Player Config
+	ctx.State.PlayerCfg = PlayerConfig{
+		NickName:      nick,
+		StartingChips: chips,
+	}
 
 	ctx.NetHandler = unet.NetHandler{}
 	ctx.Popup = NewPopupManager()
@@ -91,6 +98,12 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	case "Game_Leave":
 		ctx.UserInputChan <- EvtGameAction{Action: "GMLV"}
 
+	case "Game_Fold":
+		ctx.UserInputChan <- EvtGameAction{Action: "FOLD"}
+
+	case "Game_Call":
+		ctx.UserInputChan <- EvtGameAction{Action: "CALL"}
+
 	default:
 		after, found := strings.CutPrefix(event.SourceID, "join_")
 		if found {
@@ -100,6 +113,31 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 }
 
 func main() {
+	test_msg := make([]byte, 0)
+	msg_1 := []byte("PKRNGMST\n")
+	msg_2 := []byte("PKRPCDTP00043322\n")
+	for _, cur_byte := range msg_1 {
+		test_msg = append(test_msg, cur_byte)
+	}
+	// test_msg = append(test_msg, 0)
+	for _, cur_byte := range msg_2 {
+		test_msg = append(test_msg, cur_byte)
+	}
+	parser := unet.Parser{}
+	results := parser.ParseBytes(test_msg)
+	parser.ResetParser()
+	results = parser.ParseBytes(test_msg[results.BytesParsed:])
+
+	if results.Error {
+		fmt.Println("Fuck OFF")
+		return
+	}
+
+	// Parse Command Line Arguments
+	nickPtr := flag.String("nick", "Guest", "Player Nickname")
+	chipsPtr := flag.Int("chips", 1000, "Starting Chip Count")
+	flag.Parse()
+
 	rl.SetConfigFlags(rl.FlagWindowResizable)
 
 	const (
@@ -107,12 +145,12 @@ func main() {
 		screenHeight int32 = 1000
 	)
 
-	rl.InitWindow(screenWidth, screenHeight, "Test client")
+	rl.InitWindow(screenWidth, screenHeight, "Poker Client - "+*nickPtr)
 	defer rl.CloseWindow()
 
 	// rl.SetTargetFPS(60)
 
-	ctx := initProgCtx()
+	ctx := initProgCtx(*nickPtr, *chipsPtr)
 
 	// Start the "Game Thread"
 	go gameThread(ctx)
@@ -152,7 +190,7 @@ func main() {
 		case ScreenServerSelect:
 			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.ServerSelect)
 
-		case ScreenConnecting:
+		case ScreenConnecting, ScreenWaitingForRooms: // Reuse connecting screen for waiting
 			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
 
 		case ScreenRoomSelect:
@@ -171,8 +209,6 @@ func main() {
 		}
 
 		// calculate popups everytime
-		// as they come and go, they need to be all calculated:
-		// to change this I would need to change the definition of a popup
 		ctx.Popup.Calculate(screenBounds)
 
 		rl.BeginDrawing()

@@ -45,6 +45,7 @@ struct PlayerSeat {
   int current_bet = 0;
   bool is_folded = false;
   bool is_ready = false;
+  bool showdowm_okay = false;
   vec<u8> hand;
   PlayerInfo* connection = nullptr;
 

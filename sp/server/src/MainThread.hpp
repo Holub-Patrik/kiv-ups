@@ -183,9 +183,7 @@ private:
     std::cout << std::format("Received player info from {}, sending PIOK\n",
                              player.nickname);
     player.msg_client.writer.wait_and_insert({str{Msg::PIOK}, null});
-    player.state = PlayerState::SendingRooms;
-    player.room_send_index = 0;
-    send_room_info(player);
+    player.state = PlayerState::AwaitingJoin;
   }
 
   void send_room_info(PlayerInfo& player) {

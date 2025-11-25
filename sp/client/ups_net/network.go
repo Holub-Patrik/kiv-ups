@@ -203,14 +203,15 @@ func (self *MsgAcceptor) AcceptMessages() {
 			return
 		}
 
+		fmt.Println("Received: <- " + string(buffer[:bytes_read]))
 		var total_parsed_bytes uint64 = 0
 		results := ParseResults{}
 
-		for {
+		for total_parsed_bytes < uint64(bytes_read) {
 			results = parser.ParseBytes(buffer[total_parsed_bytes:bytes_read])
 
-			if results.error_occured {
-				fmt.Println("Accepter Thread: Client sent goobledegook")
+			if results.Error {
+				fmt.Println("Accepter Thread: Server sent goobledegook")
 				// even though the thread is still running, it will quickly close
 				self.nh.wg.Done()
 				self.nh.Disconnect()
@@ -224,14 +225,12 @@ func (self *MsgAcceptor) AcceptMessages() {
 				}
 				fmt.Println("Parsed correct message <- Code:", results.code, code_msg)
 				self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
-				total_parsed_bytes += results.bytes_parsed
+				total_parsed_bytes += results.BytesParsed
 				parser.ResetParser()
+				continue
 			}
 
-			total_parsed_bytes += results.bytes_parsed
-			if total_parsed_bytes >= uint64(bytes_read) {
-				break
-			}
+			total_parsed_bytes += results.BytesParsed
 		}
 	}
 }

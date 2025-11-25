@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// use net.Dial("tcp", host+":"+port)
-
 const (
 	MSG_CODE_SIZE    uint64 = 4
 	PAYLOAD_LEN_SIZE uint64 = 4
@@ -54,12 +52,12 @@ const (
 )
 
 type ParseResults struct {
-	error_occured bool
-	parser_done   bool
-	code          string
-	bytes_parsed  uint64
-	msg_type      MsgType
-	payload       string
+	Error       bool
+	parser_done bool
+	code        string
+	BytesParsed uint64
+	msg_type    MsgType
+	payload     string
 }
 
 type Parser struct {
@@ -96,38 +94,39 @@ func (p *Parser) ParseByte(char byte) ParserState {
 	switch p.phase {
 	case Magic_1:
 		if char != 'P' {
-			fmt.Println("Invalid Magic 1", string(char))
+			fmt.Println("Invalid Magic 1", fmt.Sprintf("%d", char))
 			return Invalid
 		}
 		p.phase = Magic_2
 
 	case Magic_2:
 		if char != 'K' {
-			fmt.Println("Invalid Magic 2", string(char))
+			fmt.Println("Invalid Magic 2", fmt.Sprintf("%d", char))
 			return Invalid
 		}
 		p.phase = Magic_3
 
 	case Magic_3:
 		if char != 'R' {
-			fmt.Println("Invalid Magic 3", string(char))
+			fmt.Println("Invalid Magic 3", fmt.Sprintf("%d", char))
 			return Invalid
 		}
 		p.phase = Type
 
 	case Type:
-		if char != 'N' && char != 'P' {
-			fmt.Println("Unknown message type", string(char))
-			return Invalid
+		if char == 'N' || char == 'P' {
+			if char == 'N' {
+				p.msg_type = NoPayloadMsg
+			} else {
+				p.msg_type = PayloadMsg
+			}
+
+			p.phase = Code
+			return OK
 		}
 
-		if char == 'N' {
-			p.msg_type = NoPayloadMsg
-		} else {
-			p.msg_type = PayloadMsg
-		}
-
-		p.phase = Code
+		fmt.Println("Unknown message type", fmt.Sprintf("%d", char))
+		return Invalid
 
 	case Code:
 		p.code.WriteByte(char)
@@ -143,7 +142,7 @@ func (p *Parser) ParseByte(char byte) ParserState {
 
 	case Size:
 		if char < '0' || char > '9' {
-			fmt.Println("Non numeric character in size", string(char))
+			fmt.Println("Non numeric character in size", fmt.Sprintf("%d", char))
 			return Invalid
 		}
 
@@ -186,21 +185,22 @@ func (p *Parser) ParseBytes(bytes []byte) ParseResults {
 			break
 		}
 
-		if res.parser_done || res.error_occured {
+		if res.parser_done || res.Error {
 			break
 		}
 
 		state := p.ParseByte(bytes[i])
-		i++
 
 		switch state {
 		case OK:
-			continue
 		case Done:
 			res.parser_done = true
 		case Invalid:
-			res.error_occured = true
+			fmt.Println("Error occured in byte", i)
+			res.Error = true
 		}
+
+		i++
 	}
 
 	if res.parser_done {
@@ -211,7 +211,7 @@ func (p *Parser) ParseBytes(bytes []byte) ParseResults {
 		}
 	}
 
-	res.bytes_parsed = i
+	res.BytesParsed = i
 	return res
 }
 
@@ -263,11 +263,12 @@ func ReadString(slice []byte) (string, bool) {
 		return "", false
 	}
 
-	stringSlice := slice[4 : 4+stringLength]
-	fmt.Println("RS: Reading string part: ", string(stringSlice))
-	if len(stringSlice) != stringLength {
+	if len(slice) < 4+stringLength {
 		return "", false
 	}
+
+	stringSlice := slice[4 : 4+stringLength]
+	fmt.Println("RS: Reading string part: ", string(stringSlice))
 
 	return string(stringSlice), true
 }

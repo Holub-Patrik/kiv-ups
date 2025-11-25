@@ -36,7 +36,6 @@ type StateMainMenu struct{}
 
 func (s *StateMainMenu) Enter(ctx *ProgCtx) {
 	fmt.Println("DFA: Entered Menu State")
-
 	ctx.StateMutex.Lock()
 	ctx.State.Screen = ScreenMainMenu
 	ctx.StateMutex.Unlock()
@@ -62,7 +61,6 @@ type StateConnecting struct{}
 
 func (s *StateConnecting) Enter(ctx *ProgCtx) {
 	fmt.Println("DFA: Entered Connecting State")
-
 	ctx.StateMutex.Lock()
 	ctx.State.Screen = ScreenConnecting
 	ctx.StateMutex.Unlock()
@@ -79,31 +77,103 @@ func (s *StateConnecting) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicS
 
 func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 	switch msg.Code {
-	case "00OK":
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: "RMRQ", Payload: ""}
-		return nil
-	case "ROOM", "DONE":
-		if msg.Code == "DONE" {
-			ctx.StateMutex.Lock()
-			ctx.State.Screen = ScreenRoomSelect
-			ctx.StateMutex.Unlock()
-			return &StateLobby{}
-		}
-		handleRoomData(ctx, msg)
+	case "PNOK":
+		// Nick OK. Now we send PlayerInfo.
+		// PKRPPINF[PlayerInfo]
+		// PlayerInfo = String(Nick) + BigInt(Chips)
+		nickStr, _ := unet.WriteString(ctx.State.PlayerCfg.NickName)
+		chipStr, _ := unet.WriteBigInt(ctx.State.PlayerCfg.StartingChips)
+
+		fmt.Println("DFA: Nick accepted. Sending PINF...")
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "PINF", Payload: nickStr + chipStr}
+		return &StateSendingInfo{}
+
+	case "FAIL":
+		fmt.Println("DFA: Connection Failed (NFAIL).")
+		ctx.NetHandler.Disconnect()
+		return &StateMainMenu{}
+
+	case "RCON":
+		// TODO: Reconnection logic
+		fmt.Println("DFA: Server asked for Reconnect (RCON). Not implemented, treating as PNOK flow for now.")
 	}
 	return nil
 }
 
 func (s *StateConnecting) Exit(ctx *ProgCtx) {}
 
+type StateReconnecting struct{}
+
+type StateSendingInfo struct{}
+
+func (s *StateSendingInfo) Enter(ctx *ProgCtx) {
+	fmt.Println("DFA: Sending Player Info...")
+}
+
+func (s *StateSendingInfo) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState {
+	return nil
+}
+
+func (s *StateSendingInfo) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
+	switch msg.Code {
+	case "PIOK":
+		// Info Accepted. Now we request rooms.
+		// Client: PKRNRMRQ
+		fmt.Println("DFA: Info Accepted. Requesting Rooms...")
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "RMRQ", Payload: ""}
+		return &StateRequestingRooms{}
+
+	case "FAIL":
+		fmt.Println("DFA: Player Info Rejected.")
+		ctx.NetHandler.Disconnect()
+		return &StateMainMenu{}
+	}
+	return nil
+}
+
+func (s *StateSendingInfo) Exit(ctx *ProgCtx) {}
+
+type StateRequestingRooms struct{}
+
+func (s *StateRequestingRooms) Enter(ctx *ProgCtx) {
+	ctx.StateMutex.Lock()
+	ctx.State.Screen = ScreenWaitingForRooms
+	// Clear existing rooms on refresh
+	ctx.State.Rooms = make(map[int]Room)
+	ctx.StateMutex.Unlock()
+}
+
+func (s *StateRequestingRooms) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState {
+	return nil
+}
+
+func (s *StateRequestingRooms) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
+	switch msg.Code {
+	case "ROOM":
+		err := handleRoomData(ctx, msg)
+		if err == nil {
+			ctx.NetMsgOutChan <- unet.NetMsg{Code: "RMOK"}
+		} else {
+			ctx.NetMsgOutChan <- unet.NetMsg{Code: "RMFL"}
+		}
+		return nil
+
+	case "DONE":
+		return &StateLobby{}
+	}
+	return nil
+}
+
+func (s *StateRequestingRooms) Exit(ctx *ProgCtx) {}
+
 type StateLobby struct{}
 
 func (s *StateLobby) Enter(ctx *ProgCtx) {
 	fmt.Println("DFA: Entered Lobby")
-
 	ctx.StateMutex.Lock()
 	ctx.State.Screen = ScreenRoomSelect
 	ctx.StateMutex.Unlock()
+	ctx.UI.SetDirty()
 }
 
 func (s *StateLobby) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState {
@@ -114,39 +184,64 @@ func (s *StateLobby) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState 
 
 		fmt.Printf("DFA: Joining Room %s with payload %s\n", evt.RoomID, payload)
 		ctx.NetMsgOutChan <- unet.NetMsg{Code: "JOIN", Payload: payload}
-
-		// TODO:
-		// here this can fail, we need to wait for an ok from the server
-		// which isn't currently being sent but it has to be implemented
-		return &StateInGame{}
+		return &StateJoiningRoom{}
 
 	case EvtBackToMain:
 		ctx.NetHandler.Disconnect()
-		ctx.StateMutex.Lock()
-		ctx.State.Screen = ScreenMainMenu
-		ctx.StateMutex.Unlock()
 		return &StateMainMenu{}
 	}
 	return nil
 }
 
 func (s *StateLobby) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
-	if msg.Code == "RMUP" || msg.Code == "ROOM" {
-		handleRoomData(ctx, msg)
+	if msg.Code == "RMUP" {
+		// PKRPRMUP[RoomUpdate]
+		// For now we might just ignore partial updates or try to parse
+		// Sending OK just to keep protocol happy if strictly required,
+		// but spec says UPOK | UPFL
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "UPOK"}
 	}
-	// TODO:
-	// implement msg.Code == "MVTR" (moved to room) to trigger the DFA state change
 	return nil
 }
 
 func (s *StateLobby) Exit(ctx *ProgCtx) {}
+
+type StateJoiningRoom struct{}
+
+func (s *StateJoiningRoom) Enter(ctx *ProgCtx) {}
+
+func (s *StateJoiningRoom) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState {
+	return nil
+}
+
+func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
+	switch msg.Code {
+	case "JNOK":
+		fmt.Println("DFA: Join OK. Waiting for Room State...")
+		return nil
+
+	case "RMST":
+		// PKRPRMST[RoomState]
+		// Parse room state (players, etc)
+		// For now we assume it parses correctly
+		fmt.Println("DFA: Received Room State. Sending STOK.")
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "STOK"}
+		return &StateInGame{}
+
+	case "JNFL":
+		fmt.Println("DFA: Join Failed.")
+		return &StateLobby{}
+	}
+	return nil
+}
+
+func (s *StateJoiningRoom) Exit(ctx *ProgCtx) {}
 
 type StateInGame struct{}
 
 func (s *StateInGame) Enter(ctx *ProgCtx) {
 	ctx.StateMutex.Lock()
 	ctx.State.Screen = ScreenInGame
-	// Reset table data
 	ctx.State.Table = PokerTable{
 		MyHand:         make([]Card, 0),
 		CommunityCards: make([]Card, 0),
@@ -159,17 +254,24 @@ func (s *StateInGame) Enter(ctx *ProgCtx) {
 func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState {
 	switch evt := input.(type) {
 	case EvtGameAction:
-		// Translate UI clicks to Net Messages
 		fmt.Println("DFA: Sending Game Action ->", evt.Action, evt.Amount)
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
-		if evt.Action == "GMLV" {
-			fmt.Println("DFA: Returning to state lobby (GMLV)")
+
+		switch evt.Action {
+		case "RDY1":
+			ctx.NetMsgOutChan <- unet.NetMsg{Code: "RDY1", Payload: ""}
+		case "GMLV":
+			ctx.NetMsgOutChan <- unet.NetMsg{Code: "GMLV", Payload: ""}
 			return &StateLobby{}
+		default:
+			// BETT, CHCK, FOLD, CALL
+			// PKRPBETT[Amount] or others
+			ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
 		}
+
 	case EvtBackToMain:
-		// Leave room logic
-		fmt.Println("DFA: Returning to state lobby (EvtBackToMain)")
-		return &StateLobby{} // Simplified
+		fmt.Println("DFA: Leaving Game")
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "GMLV", Payload: ""}
+		return &StateLobby{}
 	}
 	return nil
 }
@@ -177,7 +279,7 @@ func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState
 func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 	ctx.StateMutex.Lock()
 	defer ctx.StateMutex.Unlock()
-	defer ctx.UI.SetDirty() // Almost any net message here changes UI
+	defer ctx.UI.SetDirty()
 
 	switch msg.Code {
 	case "GMST":
@@ -187,37 +289,58 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 		ctx.State.Table.Pot = 0
 
 	case "CDTP":
-		val, _ := strconv.Atoi(msg.Payload)
-		newCard := Card{ID: val, Symbol: TranslateCardID(val)}
-		ctx.State.Table.MyHand = append(ctx.State.Table.MyHand, newCard)
-		fmt.Printf("Got Card: %s\n", newCard.Symbol)
+		pBytes := []byte(msg.Payload)
+		// Parse Card 1
+		val1, ok1 := unet.ReadSmallInt(pBytes)
+		if ok1 {
+			newCard := Card{ID: val1, Symbol: TranslateCardID(val1)}
+			ctx.State.Table.MyHand = append(ctx.State.Table.MyHand, newCard)
+
+			// Try Parse Card 2 (offset 2 bytes for SmallInt)
+			if len(pBytes) >= 4 {
+				val2, ok2 := unet.ReadSmallInt(pBytes[2:])
+				if ok2 {
+					newCard2 := Card{ID: val2, Symbol: TranslateCardID(val2)}
+					ctx.State.Table.MyHand = append(ctx.State.Table.MyHand, newCard2)
+				}
+			}
+		}
+
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "CDOK"}
 
 	case "CRVR":
-		val, _ := strconv.Atoi(msg.Payload)
+		val, _ := strconv.Atoi(msg.Payload) // Or ReadSmallInt
 		newCard := Card{ID: val, Symbol: TranslateCardID(val)}
 		ctx.State.Table.CommunityCards = append(ctx.State.Table.CommunityCards, newCard)
 
-	case "TURN": // It's someone's turn
-		// Payload "00", "01" etc (Player Index)
-		// Check if it's us? We don't know our own index yet in this simplified client
-		// But we can show who's thinking.
+	case "PTRN": // Turn
+		// Broadcast(PKRPPTRN[PlayerID])
+		// Highlight player.
 
-	case "BETT", "CALL", "FOLD":
-		// Update pot, player status, etc.
-		// Payload format based on server: "00" (PlayerID) or "000100" (PlayerID + Amount)
+	case "ACOK":
+		fmt.Println("Action Accepted")
 
-	// we are being moved back into the lobby
+	case "ACFL":
+		fmt.Println("Action Failed/Invalid")
+
+	case "BETT", "CALL", "FOLD", "CHCK":
+		// Broadcasts of other players' actions
+
+	case "SDWN":
+		// Add show down logic parsing
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "SDOK"}
+
 	case "GMDN":
 		ctx.State.Table.CommunityCards = nil
 		ctx.State.Table.MyHand = nil
 		ctx.State.Table.Pot = 0
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "DNOK"}
 	}
 
 	return nil
 }
 
-func (s *StateInGame) Exit(ctx *ProgCtx) {
-}
+func (s *StateInGame) Exit(ctx *ProgCtx) {}
 
 func startConnection(ctx *ProgCtx, host, port string) {
 	ctx.State.IsConnecting = true
@@ -225,29 +348,23 @@ func startConnection(ctx *ProgCtx, host, port string) {
 	go func() {
 		success := ctx.NetHandler.Connect(host, port)
 		if !success {
-			ctx.UserInputChan <- EvtCancelConnect{} // Simple retry trigger
+			ctx.UserInputChan <- EvtCancelConnect{}
 			return
 		}
 
 		ctx.NetMsgInChan = ctx.NetHandler.MsgIn()
 		ctx.NetMsgOutChan = ctx.NetHandler.MsgOut()
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: "CONN", Payload: ""}
+
+		nickPayload, _ := unet.WriteString(ctx.State.PlayerCfg.NickName)
+
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "CONN", Payload: nickPayload}
 	}()
 }
 
-func handleRoomData(ctx *ProgCtx, msg unet.NetMsg) {
-	// existing deserialize logic...
-	// We need to expose deserializeRoom or copy it here.
-	// For brevity, assuming we access the one in gamethread or move it to a shared utility.
-
+func handleRoomData(ctx *ProgCtx, msg unet.NetMsg) error {
 	room := deserializeRoom(msg.Payload)
-	if room.ID != -1 {
-		// valid room, send ok and proceed
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: "00OK"}
-	} else {
-		// invalid room, send fail and do not process further
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: "FAIL"}
-		return
+	if room.ID == -1 {
+		return fmt.Errorf("invalid room")
 	}
 
 	fmt.Printf("GameThread: Received Room: ID=%d, Name=%s\n", room.ID, room.Name)
@@ -257,6 +374,7 @@ func handleRoomData(ctx *ProgCtx, msg unet.NetMsg) {
 	}
 	ctx.State.Rooms[room.ID] = room
 	ctx.StateMutex.Unlock()
+	return nil
 }
 
 func deserializeRoom(payload string) Room {
@@ -283,7 +401,10 @@ func deserializeRoom(payload string) Room {
 		valid_room.Name = name
 	}
 
-	offset += 4 + len(name)
+	// 4 bytes for len + len(name)
+	nameLen, _ := unet.ReadBigInt(byte_payload[4:]) // Re-read len to calculate offset
+	offset += 4 + nameLen
+
 	curr_players, ok := unet.ReadSmallInt(byte_payload[offset:])
 
 	if !ok {

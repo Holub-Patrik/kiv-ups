@@ -132,7 +132,9 @@ public:
           // Insert into message queue for processing
           msg_server.writer.wait_and_insert(
               Net::MsgStruct{results.code, payload});
+          total_parsed_bytes += results.bytes_parsed;
           parser.reset_parser();
+          continue;
         }
 
         total_parsed_bytes += results.bytes_parsed;

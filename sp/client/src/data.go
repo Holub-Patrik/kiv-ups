@@ -49,6 +49,11 @@ type PokerTable struct {
 	Players  map[int]PlayerData
 }
 
+type PlayerConfig struct {
+	NickName      string
+	StartingChips int
+}
+
 type GameState struct {
 	Screen UIScreen
 	Rooms  map[int]Room
@@ -57,6 +62,7 @@ type GameState struct {
 
 	ServerIP   string
 	ServerPort string
+	PlayerCfg  PlayerConfig
 
 	Table     PokerTable
 	BetAmount string
@@ -65,7 +71,7 @@ type GameState struct {
 type UserInputEvent any
 
 type EvtGameAction struct {
-	Action string // "FOLD", "CALL", "BETT", "CHCK"
+	Action string // "FOLD", "CALL", "BETT", "CHCK", "RDY1"
 	Amount string // For betting
 }
 

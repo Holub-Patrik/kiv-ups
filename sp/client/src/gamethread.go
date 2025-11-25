@@ -36,11 +36,12 @@ func gameThread(ctx *ProgCtx) {
 					ctx.Popup.AddPopup("Connection Lost", time.Second*3)
 					nextState = &StateMainMenu{} // Fallback to safe state
 				}
-			}
-			// Global handlers (like PING) could go here
+			} else {
+				// Global handlers (like PING) could go here
 
-			// State specific handlers
-			nextState = currentState.HandleNetwork(ctx, msg)
+				// State specific handlers
+				nextState = currentState.HandleNetwork(ctx, msg)
+			}
 
 		default:
 			time.Sleep(time.Millisecond * 10)
