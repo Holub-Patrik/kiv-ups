@@ -14,6 +14,7 @@ func buildUI(ctx *ProgCtx) {
 	ctx.UI.MainMenu = buildMainMenu(ctx)
 	ctx.UI.ServerSelect = buildServerConnectMenu(ctx)
 	ctx.UI.Connecting = buildConnectingScreen(ctx)
+	ctx.UI.Reconnecting = buildReconnectingMenu(ctx)
 	ctx.UI.Game = buildGameScreen(ctx)
 }
 
@@ -64,6 +65,27 @@ func buildConnectingScreen(ctx *ProgCtx) UIElement {
 	cancel_btn := w.NewCenterComponent(w.NewButtonComponent("Connecting_CancelBtn", "Cancel", 150, 50))
 	connecting.AddChild(label)
 	connecting.AddChild(cancel_btn)
+
+	connectingPanel := w.NewPanelComponent(rl.Gray, connecting)
+	connectingBounds := w.NewBoundsBox(0.4, 0.4, connectingPanel)
+
+	return UIElement{dirty: true, component: connectingBounds}
+}
+
+func buildReconnectingMenu(ctx *ProgCtx) UIElement {
+	_ = ctx
+
+	connecting := w.NewVStack(10)
+	label := w.NewCenterComponent(w.NewLabelComponent("Reconnect?", 20, rl.White))
+	buttons := w.NewHStack(20)
+	accept_btn := w.NewCenterComponent(w.NewButtonComponent("Reconnect_Accept", "Accept", 150, 50))
+	decline_btn := w.NewCenterComponent(w.NewButtonComponent("Reconnect_Decline", "Decline", 150, 50))
+
+	buttons.AddChild(accept_btn)
+	buttons.AddChild(decline_btn)
+
+	connecting.AddChild(label)
+	connecting.AddChild(buttons)
 
 	connectingPanel := w.NewPanelComponent(rl.Gray, connecting)
 	connectingBounds := w.NewBoundsBox(0.4, 0.4, connectingPanel)

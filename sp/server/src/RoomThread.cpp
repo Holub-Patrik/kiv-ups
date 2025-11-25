@@ -77,12 +77,15 @@ Room::~Room() {
 }
 
 void Room::accept_player(uq_ptr<PlayerInfo>&& p) {
-  // TODO: implement room serialiazation
   p->msg_client.writer.wait_and_insert({str{Msg::RMST}, "ToBeSpecified"});
   {
     std::lock_guard g{incoming_mtx};
     incoming_queue.emplace_back(std::move(p));
   }
+}
+
+void Room::reconnect_player(uq_ptr<PlayerInfo>&& p) {
+  accept_player(std::move(p));
 }
 
 str Room::to_payload_string() const {
@@ -128,6 +131,9 @@ void Room::room_logic() {
 }
 
 void Room::process_incoming_players() {
+  // Here we should send general room information to players
+  // If we are reconnecting players, extended information should be sent, since
+  // he doesn't know his own state
   std::lock_guard g{incoming_mtx};
   if (incoming_queue.empty())
     return;
@@ -135,7 +141,6 @@ void Room::process_incoming_players() {
   for (auto& p : incoming_queue) {
     bool seated = false;
 
-    // Try reconnect (player already has a seat but disconnected)
     for (auto& seat : ctx.seats) {
       if (seat.is_occupied && seat.nickname == p->nickname &&
           seat.connection == nullptr) {
@@ -147,7 +152,6 @@ void Room::process_incoming_players() {
       }
     }
 
-    // Assign new seat
     if (!seated) {
       for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
         if (!ctx.seats[i].is_occupied) {
@@ -164,7 +168,6 @@ void Room::process_incoming_players() {
       }
     }
 
-    // If no seat available, return to main list
     if (!seated) {
       std::cout << std::format("No seat for {}, returning to main list\n",
                                p->nickname);

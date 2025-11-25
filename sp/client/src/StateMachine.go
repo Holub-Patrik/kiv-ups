@@ -78,7 +78,6 @@ func (s *StateConnecting) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicS
 func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 	switch msg.Code {
 	case "PNOK":
-		// Nick OK. Now we send PlayerInfo.
 		// PKRPPINF[PlayerInfo]
 		// PlayerInfo = String(Nick) + BigInt(Chips)
 		nickStr, _ := unet.WriteString(ctx.State.PlayerCfg.NickName)
@@ -89,12 +88,11 @@ func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicStat
 		return &StateSendingInfo{}
 
 	case "FAIL":
-		fmt.Println("DFA: Connection Failed (NFAIL).")
+		fmt.Println("DFA: Connection Failed (FAIL).")
 		ctx.NetHandler.Disconnect()
 		return &StateMainMenu{}
 
 	case "RCON":
-		// TODO: Reconnection logic
 		fmt.Println("DFA: Server asked for Reconnect (RCON). Not implemented, treating as PNOK flow for now.")
 	}
 	return nil
@@ -103,6 +101,34 @@ func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicStat
 func (s *StateConnecting) Exit(ctx *ProgCtx) {}
 
 type StateReconnecting struct{}
+
+func (s *StateReconnecting) Enter(ctx *ProgCtx) {
+	fmt.Println("DFA: Reconnecting...")
+	ctx.StateMutex.Lock()
+	ctx.State.Screen = ScreenReconnecting
+	ctx.StateMutex.Unlock()
+}
+
+func (s *StateReconnecting) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState {
+	switch input.(type) {
+	case EvtAcceptReconnect:
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "RCON"}
+		ctx.State.Reconnected = true
+		return &StateJoiningRoom{}
+
+	case EvtDeclineReconnect:
+		fmt.Println("User declined reconnect, sending PlayerInfo as if RCON wasn't offered")
+		ctx.State.Reconnected = false
+		return &StateSendingInfo{}
+	}
+	return nil
+}
+
+func (s *StateReconnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
+	return nil
+}
+
+func (s *StateReconnecting) Exit(ctx *ProgCtx) {}
 
 type StateSendingInfo struct{}
 
@@ -199,6 +225,7 @@ func (s *StateLobby) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 		// For now we might just ignore partial updates or try to parse
 		// Sending OK just to keep protocol happy if strictly required,
 		// but spec says UPOK | UPFL
+
 		ctx.NetMsgOutChan <- unet.NetMsg{Code: "UPOK"}
 	}
 	return nil
@@ -221,6 +248,9 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicSta
 		return nil
 
 	case "RMST":
+		// if reconnecting, the information we are given is different
+		if ctx.State.Reconnected {
+		}
 		// PKRPRMST[RoomState]
 		// Parse room state (players, etc)
 		// For now we assume it parses correctly
@@ -258,19 +288,17 @@ func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState
 
 		switch evt.Action {
 		case "RDY1":
-			ctx.NetMsgOutChan <- unet.NetMsg{Code: "RDY1", Payload: ""}
+			ctx.NetMsgOutChan <- unet.NetMsg{Code: "RDY1"}
 		case "GMLV":
-			ctx.NetMsgOutChan <- unet.NetMsg{Code: "GMLV", Payload: ""}
+			ctx.NetMsgOutChan <- unet.NetMsg{Code: "GMLV"}
 			return &StateLobby{}
 		default:
-			// BETT, CHCK, FOLD, CALL
-			// PKRPBETT[Amount] or others
 			ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
 		}
 
 	case EvtBackToMain:
 		fmt.Println("DFA: Leaving Game")
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: "GMLV", Payload: ""}
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: "GMLV"}
 		return &StateLobby{}
 	}
 	return nil

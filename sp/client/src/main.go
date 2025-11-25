@@ -64,6 +64,12 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	case "Connecting_CancelBtn":
 		ctx.UserInputChan <- EvtCancelConnect{}
 
+	case "Reconnect_Accept":
+		ctx.UserInputChan <- EvtAcceptReconnect{}
+
+	case "Reconnect_Decline":
+		ctx.UserInputChan <- EvtDeclineReconnect{}
+
 	case "RoomSelect_BackBtn":
 		ctx.UserInputChan <- EvtBackToMain{}
 

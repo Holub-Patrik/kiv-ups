@@ -109,6 +109,7 @@ public:
   }
 
   void accept_player(uq_ptr<PlayerInfo>&& p);
+  void reconnect_player(uq_ptr<PlayerInfo>&& p);
   str to_payload_string() const;
   bool can_player_join() const;
   void room_logic();

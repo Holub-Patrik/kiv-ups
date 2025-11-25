@@ -12,6 +12,7 @@ const (
 	ScreenMainMenu UIScreen = iota
 	ScreenServerSelect
 	ScreenConnecting
+	ScreenReconnecting
 	ScreenWaitingForRooms
 	ScreenRoomSelect
 	ScreenInGame
@@ -60,15 +61,22 @@ type GameState struct {
 
 	IsConnecting bool
 
-	ServerIP   string
-	ServerPort string
-	PlayerCfg  PlayerConfig
+	ServerIP    string
+	ServerPort  string
+	PlayerCfg   PlayerConfig
+	Reconnected bool
 
 	Table     PokerTable
 	BetAmount string
 }
 
 type UserInputEvent any
+
+type EvtAcceptReconnect struct{}
+type EvtDeclineReconnect struct{}
+type EvtCancelConnect struct{}
+type EvtQuit struct{}
+type EvtBackToMain struct{}
 
 type EvtGameAction struct {
 	Action string // "FOLD", "CALL", "BETT", "CHCK", "RDY1"
@@ -80,15 +88,9 @@ type EvtConnect struct {
 	Port string
 }
 
-type EvtCancelConnect struct{}
-
 type EvtRoomJoin struct {
 	RoomID string
 }
-
-type EvtQuit struct{}
-
-type EvtBackToMain struct{}
 
 type UIElement struct {
 	dirty     bool
@@ -99,6 +101,7 @@ type UIStore struct {
 	MainMenu     UIElement
 	ServerSelect UIElement
 	Connecting   UIElement
+	Reconnecting UIElement
 	RoomSelect   UIElement
 	Game         UIElement
 }

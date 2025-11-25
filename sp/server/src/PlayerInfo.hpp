@@ -10,7 +10,8 @@ constexpr int MAX_CONSECUTIVE_ERRORS = 3;
 constexpr int MAX_FAST_FORWARD_BYTES = 100;
 
 enum class PlayerState {
-  Connected,     // Just connected, waiting for CONN
+  Connected, // Just connected, waiting for CONN
+  AwaitingReconnect,
   AwaitingRooms, // Sent PNOK, waiting for PINF
   SendingRooms,  // Received PINF, sending room list
   AwaitingJoin,  // Finished sending rooms, waiting for JOIN
@@ -26,7 +27,11 @@ public:
   bool disconnected = false;
   int room_send_index = 0;
   int invalid_msg_count = 0;
+  int reconnect_index = 0;
+
   str nickname;
+  u64 chips;
+
   PlayerState state = PlayerState::Connected;
   CB::Client<Net::MsgStruct, 128> msg_client;
   Net::Serde::MainParser parser{};

@@ -6,6 +6,7 @@
 #include "RoomThread.hpp"
 #include "SockWrapper.hpp"
 
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <sys/socket.h>
@@ -61,6 +62,23 @@ private:
           player.disconnected = true;
         }
         break;
+
+      case PlayerState::AwaitingReconnect:
+        if (msg.code == Msg::RCON) {
+          std::cout << "Player accepted recoonnect" << std::endl;
+          return i;
+        } else if (msg.code == Msg::PINF) {
+          if (!msg.payload) {
+            std::cerr << "PINF message without payload, disconnecting\n";
+            player.disconnected = true;
+            break;
+          }
+          handle_pinf(player, msg.payload.value());
+        } else {
+          std::cerr << std::format(
+              "Unexpected message {} in SendingRooms state\n", msg.code);
+          player.disconnected = true;
+        }
 
       case PlayerState::AwaitingRooms:
         if (msg.code == Msg::PINF) {
@@ -149,6 +167,7 @@ private:
     if (!nick_opt) {
       std::cerr << "Failed to parse nickname from CONN payload\n";
       player.msg_client.writer.wait_and_insert({str{Msg::FAIL}, null});
+      player.disconnected = true;
       return;
     }
 
@@ -161,11 +180,11 @@ private:
       for (const auto& seat : room.ctx.seats) {
         if (seat.is_occupied && seat.nickname == nickname &&
             seat.connection == nullptr) {
-          // Player found in disconnected state
           std::cout << std::format("Reconnect candidate {} found in room {}\n",
                                    nickname, i);
+          player.reconnect_index = i;
           player.msg_client.writer.wait_and_insert({str{Msg::RCON}, null});
-          player.state = PlayerState::AwaitingRooms;
+          player.state = PlayerState::AwaitingReconnect;
           return;
         }
       }
@@ -180,8 +199,19 @@ private:
   void handle_pinf(PlayerInfo& player, const str& payload) {
     // For now, we trust the client (no DB validation)
     // In future: verify player info structure
+    const auto& mb_chips = Net::Serde::read_bg_int(payload);
+    if (!mb_chips) {
+      std::cout << "Player sent malformed chips" << std::endl;
+      player.disconnected = true;
+      return;
+    }
+    const auto [chips, _] = mb_chips.value();
+
+    player.chips = chips;
+
     std::cout << std::format("Received player info from {}, sending PIOK\n",
                              player.nickname);
+
     player.msg_client.writer.wait_and_insert({str{Msg::PIOK}, null});
     player.state = PlayerState::AwaitingJoin;
   }
@@ -260,7 +290,12 @@ private:
           const auto& [p_idx, room_idx] = *it;
           if (p_idx < players.size() && room_idx < rooms.size()) {
             players[p_idx]->flush_messages();
-            rooms[room_idx]->accept_player(std::move(players[p_idx]));
+            if (players[p_idx]->reconnect_index > 0) {
+              players[p_idx]->reconnect_index = 0;
+              rooms[room_idx]->reconnect_player(std::move(players[p_idx]));
+            } else {
+              rooms[room_idx]->accept_player(std::move(players[p_idx]));
+            }
             players.erase(players.begin() + p_idx);
           }
         }
