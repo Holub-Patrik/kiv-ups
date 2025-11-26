@@ -93,7 +93,7 @@ func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicStat
 		return &StateMainMenu{}
 
 	case "RCON":
-		fmt.Println("DFA: Server asked for Reconnect (RCON). Not implemented, treating as PNOK flow for now.")
+		return &StateReconnecting{}
 	}
 	return nil
 }

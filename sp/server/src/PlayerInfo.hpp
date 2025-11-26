@@ -4,6 +4,7 @@
 #include "MessageSerde.hpp"
 #include "SockWrapper.hpp"
 #include <ostream>
+#include <sys/socket.h>
 
 constexpr std::size_t MSG_BATCH_SIZE = 10;
 constexpr int MAX_CONSECUTIVE_ERRORS = 3;
@@ -23,8 +24,11 @@ private:
   CB::TwinBuffer<Net::MsgStruct, 128> msg_buf;
   CB::Server<Net::MsgStruct, 128> msg_server;
 
+  bool ping_received = false;
+
 public:
   bool disconnected = false;
+
   int room_send_index = 0;
   int invalid_msg_count = 0;
   int reconnect_index = 0;
@@ -49,12 +53,29 @@ public:
     parser.reset_parser();
   }
 
+  void clear_ping() { ping_received = false; }
+  bool get_ping() const noexcept { return ping_received; }
+  // bypass to send a ping message immedietly
+  void send_ping() {
+    const auto msg = Net::MsgStruct{"PING", null};
+    const auto& msg_str = msg.to_string();
+
+    const auto sent_bytes =
+        send(sock.get_fd(), msg_str.data(), msg_str.size(), 0);
+    if (sent_bytes < 0) {
+      std::cerr << "Send error, disconnecting client FD: " << sock.get_fd()
+                << "\n";
+      disconnected = true;
+      return;
+    }
+  }
+
   auto accept_messages() -> void {
     std::array<char, 256> byte_buf{0};
 
     for (std::size_t i = 0; i < MSG_BATCH_SIZE; i++) {
       const auto bytes_read =
-          recv(sock.get_fd(), byte_buf.data(), byte_buf.size(), MSG_DONTWAIT);
+          recv(sock.get_fd(), byte_buf.data(), byte_buf.size(), 0);
 
       if (bytes_read == 0) {
         std::cout << "Client disconnected (FD: " << sock.get_fd() << ")\n";
@@ -134,9 +155,15 @@ public:
                                            : "")
                     << std::endl;
 
-          // Insert into message queue for processing
-          msg_server.writer.wait_and_insert(
-              Net::MsgStruct{results.code, payload});
+          // ping shortcut so server logic can just check if it came
+          if (results.code == "PING") {
+            ping_received = true;
+          } else {
+            // Insert into message queue for processing
+            msg_server.writer.wait_and_insert(
+                Net::MsgStruct{results.code, payload});
+          }
+
           total_parsed_bytes += results.bytes_parsed;
           parser.reset_parser();
           continue;

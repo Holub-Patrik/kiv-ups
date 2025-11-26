@@ -1,5 +1,8 @@
 #include "RoomThread.hpp"
 #include "Babel.hpp"
+#include "MessageSerde.hpp"
+#include "PlayerInfo.hpp"
+#include <sstream>
 
 namespace GameUtils {
 str Card::to_string() const { return std::format("{:02}", value); }
@@ -88,14 +91,31 @@ void Room::reconnect_player(uq_ptr<PlayerInfo>&& p) {
   accept_player(std::move(p));
 }
 
-str Room::to_payload_string() const {
+str Room::serialize() const {
   using namespace Net::Serde;
+
   int occ = 0;
   for (const auto& s : ctx.seats)
     if (s.is_occupied)
       occ++;
+
   return write_bg_int(id) + write_net_str(name) + write_sm_int(occ) +
          write_sm_int(ROOM_MAX_PLAYERS);
+}
+
+str Room::serialize_up() {
+  using namespace Net::Serde;
+
+  std::lock_guard g{up_mtx};
+  std::stringstream ss;
+
+  ss << write_bg_int(updates.size());
+  for (const auto& update : updates) {
+    ss << update;
+  }
+  updates.clear();
+
+  return ss.str();
 }
 
 bool Room::can_player_join() const {
@@ -212,11 +232,17 @@ void Room::process_network_io() {
         // Global leave command
         if (msg.code == Msg::GMLV) {
           std::cout << std::format("Player {} leaving room\n", seat.nickname);
-          std::lock_guard lg{return_mtx};
-          return_arr.emplace_back(std::unique_ptr<PlayerInfo>(p));
+          {
+            std::lock_guard lg{return_mtx};
+            p->state = PlayerState::AwaitingJoin;
+            return_arr.emplace_back(std::unique_ptr<PlayerInfo>(p));
+          }
+
           seat.connection = nullptr;
-          seat.is_occupied = false;
-          seat.nickname = "";
+          if (current_state->get_name() == "Lobby") {
+            seat.is_occupied = false;
+            seat.nickname = "";
+          }
           continue;
         }
 

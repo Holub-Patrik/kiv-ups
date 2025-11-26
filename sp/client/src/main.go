@@ -199,6 +199,9 @@ func main() {
 		case ScreenConnecting, ScreenWaitingForRooms: // Reuse connecting screen for waiting
 			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
 
+		case ScreenReconnecting:
+			elementsToDraw = append(elementsToDraw, ctx.UI.Reconnecting)
+
 		case ScreenRoomSelect:
 			roomSelect := buildRoomSelectUI(ctx)
 			roomSelect.component.Rebuild(ctx.UI.RoomSelect.component)

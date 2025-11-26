@@ -5,6 +5,7 @@
 
 extern "C" {
 #include <asm-generic/socket.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -122,6 +123,14 @@ public:
         accept(server.get_fd(), (struct sockaddr*)&addr, &addr_len);
     if (accepted_sock <= 0) {
       throw SocketException{SocketExceptionType::ACCEPT};
+    }
+
+    int flags = fcntl(sock_fd, F_GETFL, 0);
+    if (flags < 0) {
+      throw SocketException{SocketExceptionType::SETSOCKOPT};
+    }
+    if (fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+      throw SocketException{SocketExceptionType::SETSOCKOPT};
     }
 
     sock_fd = accepted_sock;

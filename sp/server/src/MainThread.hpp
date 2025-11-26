@@ -219,7 +219,7 @@ private:
   void send_room_info(PlayerInfo& player) {
     if (player.room_send_index < rooms.size()) {
       const auto& room = *rooms[player.room_send_index];
-      std::string room_payload = room.to_payload_string();
+      std::string room_payload = room.serialize();
 
       std::cout << std::format("Sending room {} to {}\n", room.name,
                                player.nickname);

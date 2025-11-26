@@ -65,7 +65,10 @@ struct RoomContext {
 
   int count_active_players() const;
   void broadcast(const str_v& code, const opt<str>& payload);
+  void broadcast_ex(int seat_idx, const str_v& code, const opt<str>& payload);
   void send_to(int seat_idx, const str_v& code, const opt<str>& payload);
+  str serialize_compact() const;
+  str serialize_full() const;
 };
 
 // FSM Interface
@@ -94,10 +97,16 @@ private:
   uq_ptr<RoomState> next_state_ptr;
   bool pending_transition = false;
 
+  std::mutex up_mtx;
+  vec<str> updates;
+  str serialize_udpdate();
+
 public:
   usize id;
   str name;
   RoomContext ctx;
+
+  std::atomic<bool> dirty;
 
   Room(std::size_t id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
        std::mutex& return_mutex);
@@ -110,7 +119,8 @@ public:
 
   void accept_player(uq_ptr<PlayerInfo>&& p);
   void reconnect_player(uq_ptr<PlayerInfo>&& p);
-  str to_payload_string() const;
+  str serialize() const;
+  str serialize_up();
   bool can_player_join() const;
   void room_logic();
 
