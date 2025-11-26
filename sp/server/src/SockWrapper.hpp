@@ -125,13 +125,16 @@ public:
       throw SocketException{SocketExceptionType::ACCEPT};
     }
 
+    /*
+    // If O_NONBLOCK is set, the socket blocks, I have no idea why
+    // Also the blocking behaviour happens on read and recv
     int flags = fcntl(sock_fd, F_GETFL, 0);
     if (flags < 0) {
       throw SocketException{SocketExceptionType::SETSOCKOPT};
     }
     if (fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
       throw SocketException{SocketExceptionType::SETSOCKOPT};
-    }
+    } */
 
     sock_fd = accepted_sock;
   }

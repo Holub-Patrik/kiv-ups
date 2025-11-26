@@ -5,6 +5,7 @@
 #include "SockWrapper.hpp"
 #include <ostream>
 #include <sys/socket.h>
+#include <unistd.h>
 
 constexpr std::size_t MSG_BATCH_SIZE = 10;
 constexpr int MAX_CONSECUTIVE_ERRORS = 3;
@@ -74,8 +75,19 @@ public:
     std::array<char, 256> byte_buf{0};
 
     for (std::size_t i = 0; i < MSG_BATCH_SIZE; i++) {
+      /*
+       *
+      const auto bytes_read =
+          read(sock.get_fd(), byte_buf.data(), byte_buf.size());
+      */
+
+      /* // This blocks if O_NONBLOCK is set on accepted socket
       const auto bytes_read =
           recv(sock.get_fd(), byte_buf.data(), byte_buf.size(), 0);
+       */
+      // This is the original code, which worked fine
+      const auto bytes_read =
+          recv(sock.get_fd(), byte_buf.data(), byte_buf.size(), MSG_DONTWAIT);
 
       if (bytes_read == 0) {
         std::cout << "Client disconnected (FD: " << sock.get_fd() << ")\n";

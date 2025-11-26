@@ -154,7 +154,7 @@ func main() {
 	rl.InitWindow(screenWidth, screenHeight, "Poker Client - "+*nickPtr)
 	defer rl.CloseWindow()
 
-	// rl.SetTargetFPS(60)
+	rl.SetTargetFPS(60)
 
 	ctx := initProgCtx(*nickPtr, *chipsPtr)
 
