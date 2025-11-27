@@ -27,7 +27,6 @@ private:
   auto process_player_messages(PlayerInfo& player) -> opt<usize> {
     // Process up to MSG_BATCH_SIZE messages per player per tick
     for (usize i = 0; i < MSG_BATCH_SIZE; i++) {
-      player.accept_messages();
       auto msg_opt = player.msg_client.reader.read();
       if (!msg_opt)
         break; // No more messages
@@ -135,8 +134,6 @@ private:
         break;
       }
 
-      player.send_messages();
-
       // Check if player was marked disconnected during processing
       if (player.disconnected) {
         break;
@@ -166,7 +163,7 @@ private:
     const auto& nick_opt = Net::Serde::read_str(payload);
     if (!nick_opt) {
       std::cerr << "Failed to parse nickname from CONN payload\n";
-      player.msg_client.writer.wait_and_insert({str{Msg::FAIL}, null});
+      player.send_message({str{Msg::FAIL}, null});
       player.disconnected = true;
       return;
     }
@@ -183,7 +180,7 @@ private:
           std::cout << std::format("Reconnect candidate {} found in room {}\n",
                                    nickname, i);
           player.reconnect_index = i;
-          player.msg_client.writer.wait_and_insert({str{Msg::RCON}, null});
+          player.send_message({str{Msg::RCON}, null});
           player.state = PlayerState::AwaitingReconnect;
           return;
         }
@@ -192,7 +189,7 @@ private:
 
     // New player
     std::cout << std::format("New player {} connected\n", nickname);
-    player.msg_client.writer.wait_and_insert({str{Msg::PNOK}, null});
+    player.send_message({str{Msg::PNOK}, null});
     player.state = PlayerState::AwaitingRooms;
   }
 
@@ -209,10 +206,11 @@ private:
 
     player.chips = chips;
 
-    std::cout << std::format("Received player info from {}, sending PIOK\n",
-                             player.nickname);
+    std::cout << std::format(
+        "Received player info from {} ({}), sending PIOK\n", player.nickname,
+        player.chips);
 
-    player.msg_client.writer.wait_and_insert({str{Msg::PIOK}, null});
+    player.send_message({str{Msg::PIOK}, null});
     player.state = PlayerState::AwaitingJoin;
   }
 
@@ -223,12 +221,12 @@ private:
 
       std::cout << std::format("Sending room {} to {}\n", room.name,
                                player.nickname);
-      player.msg_client.writer.wait_and_insert({str{Msg::ROOM}, room_payload});
+      player.send_message({str{Msg::ROOM}, room_payload});
       player.room_send_index++;
     } else {
       std::cout << std::format("Done sending rooms to {}, sending DONE\n",
                                player.nickname);
-      player.msg_client.writer.wait_and_insert({str{Msg::DONE}, null});
+      player.send_message({str{Msg::DONE}, null});
       player.state = PlayerState::AwaitingJoin;
     }
   }
@@ -239,7 +237,7 @@ private:
     const auto& id_opt = Net::Serde::read_bg_int(payload);
     if (!id_opt) {
       std::cerr << "Failed to parse room ID from JOIN payload\n";
-      player.msg_client.writer.wait_and_insert({str{Msg::JNFL}, null});
+      player.send_message({str{Msg::JNFL}, null});
       return null;
     }
 
@@ -251,20 +249,20 @@ private:
         if (!room.can_player_join()) {
           std::cerr << std::format("Room {} full, rejecting {}\n", req_id,
                                    player.nickname);
-          player.msg_client.writer.wait_and_insert({str{Msg::JNFL}, null});
+          player.send_message({str{Msg::JNFL}, null});
           return null;
         }
 
         std::cout << std::format("Accepted {} into room {}\n", player.nickname,
                                  req_id);
-        player.msg_client.writer.wait_and_insert({str{Msg::JNOK}, null});
+        player.send_message({str{Msg::JNOK}, null});
         return i;
       }
     }
 
     std::cerr << std::format("Room {} not found for {}\n", req_id,
                              player.nickname);
-    player.msg_client.writer.wait_and_insert({str{Msg::JNFL}, null});
+    player.send_message({str{Msg::JNFL}, null});
     return null;
   }
 
@@ -289,7 +287,6 @@ private:
              ++it) {
           const auto& [p_idx, room_idx] = *it;
           if (p_idx < players.size() && room_idx < rooms.size()) {
-            players[p_idx]->flush_messages();
             if (players[p_idx]->reconnect_index > 0) {
               players[p_idx]->reconnect_index = 0;
               rooms[room_idx]->reconnect_player(std::move(players[p_idx]));
@@ -336,7 +333,7 @@ public:
     std::cout << "Server starting on port " << port << std::endl;
 
     running = true;
-    logic_thread = std::thread(&Server::process_logic, this);
+    logic_thread = std::thread{&Server::process_logic, this};
 
     ServerSocket server_sock(port);
 

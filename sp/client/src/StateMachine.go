@@ -78,13 +78,7 @@ func (s *StateConnecting) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicS
 func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 	switch msg.Code {
 	case "PNOK":
-		// PKRPPINF[PlayerInfo]
-		// PlayerInfo = String(Nick) + BigInt(Chips)
-		nickStr, _ := unet.WriteString(ctx.State.PlayerCfg.NickName)
-		chipStr, _ := unet.WriteBigInt(ctx.State.PlayerCfg.StartingChips)
-
-		fmt.Println("DFA: Nick accepted. Sending PINF...")
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: "PINF", Payload: nickStr + chipStr}
+		fmt.Println("DFA: Nick accepted.")
 		return &StateSendingInfo{}
 
 	case "FAIL":
@@ -133,6 +127,9 @@ func (s *StateReconnecting) Exit(ctx *ProgCtx) {}
 type StateSendingInfo struct{}
 
 func (s *StateSendingInfo) Enter(ctx *ProgCtx) {
+	chipStr, _ := unet.WriteBigInt(ctx.State.PlayerCfg.StartingChips)
+
+	ctx.NetMsgOutChan <- unet.NetMsg{Code: "PINF", Payload: chipStr}
 	fmt.Println("DFA: Sending Player Info...")
 }
 

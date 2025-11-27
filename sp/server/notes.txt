@@ -1,5 +1,25 @@
-PKRPCONN[nick]
-PKRNPNOK | PKRPRCON | PKRNFAIL
-- PKRNPNOK = Player Nick OK
-- PKRNRCON = Reconnect
-- 
+When connecting normally, the game is starting and thus there isn't info to send
+The only meaningful messages are messages to send other player info
+Upon game start the clients themselves will draw 2 hidden cards.
+When reconnecting, additional information has to be sent?
+
+PlayerID would be the server index, but I don't know if that really is achievable
+Yea, fuck it PKRPPTRN[PlayerNick]
+
+Connecting:
+bet has to be zero, no cards so no player state
+[PlayerCount]([PlayerNick][Chips]..)
+
+Reconnecting:
+[Chips][Folded(Either 1 for True or 0 for false)][PlayerCount]([PlayerNick][Chips][ActionTaken][ActionAmount]..)
+
+Game Showdown:
+[PlayerCount]([PlayerNick][Card1][Card2]..)
+
+ActionTaken:
+Small Int:
+0 = Check
+1 = Call
+2 = Fold
+3 = Bet
+4 = Left/Disconnected

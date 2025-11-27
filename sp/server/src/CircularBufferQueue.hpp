@@ -44,7 +44,7 @@ private:
   Buffer<Type, Size>& buffer;
 
 public:
-  Reader<Type, Size>(Buffer<Type, Size>& buf) : buffer(buf) {}
+  Reader(Buffer<Type, Size>& buf) : buffer(buf) {}
 
   // The same as read, but doesn't advance the read position
   const Type& peek() const { return buffer.data[buffer.read_pos]; }
@@ -77,7 +77,7 @@ private:
   Buffer<Type, Size>& buffer;
 
 public:
-  Writer<Type, Size>(Buffer<Type, Size>& buf) : buffer(buf) {}
+  Writer(Buffer<Type, Size>& buf) : buffer(buf) {}
 
   bool insert(const Type& item) const {
     if (buffer.write_pos == buffer.read_pos) {
@@ -109,7 +109,7 @@ public:
   Reader<Type, Size> reader;
   Writer<Type, Size> writer;
 
-  Server<Type, Size>(TwinBuffer<Type, Size>& twin_buf)
+  Server(TwinBuffer<Type, Size>& twin_buf)
       : reader(twin_buf.buffer_one), writer(twin_buf.buffer_two) {}
 };
 
@@ -118,7 +118,7 @@ public:
   Reader<Type, Size> reader;
   Writer<Type, Size> writer;
 
-  Client<Type, Size>(TwinBuffer<Type, Size>& twin_buf)
+  Client(TwinBuffer<Type, Size>& twin_buf)
       : reader(twin_buf.buffer_two), writer(twin_buf.buffer_one) {}
 };
 

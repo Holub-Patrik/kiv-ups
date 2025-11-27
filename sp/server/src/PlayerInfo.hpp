@@ -27,6 +27,8 @@ private:
 
   bool ping_received = false;
 
+  std::thread send_t;
+
 public:
   bool disconnected = false;
 
@@ -42,10 +44,12 @@ public:
   Net::Serde::MainParser parser{};
   RemoteSocket sock;
 
-  virtual ~PlayerInfo() {}
+  virtual ~PlayerInfo() { send_t.join(); }
 
   PlayerInfo(const ServerSocket& server_sock)
-      : sock(server_sock), msg_server(msg_buf), msg_client(msg_buf) {}
+      : sock(server_sock), msg_server(msg_buf), msg_client(msg_buf) {
+    send_t = std::thread{&PlayerInfo::accept_messages, this};
+  }
 
   // Reset all connection-specific state
   void reset() {
@@ -74,20 +78,9 @@ public:
   auto accept_messages() -> void {
     std::array<char, 256> byte_buf{0};
 
-    for (std::size_t i = 0; i < MSG_BATCH_SIZE; i++) {
-      /*
-       *
-      const auto bytes_read =
-          read(sock.get_fd(), byte_buf.data(), byte_buf.size());
-      */
-
-      /* // This blocks if O_NONBLOCK is set on accepted socket
+    while (!disconnected) {
       const auto bytes_read =
           recv(sock.get_fd(), byte_buf.data(), byte_buf.size(), 0);
-       */
-      // This is the original code, which worked fine
-      const auto bytes_read =
-          recv(sock.get_fd(), byte_buf.data(), byte_buf.size(), MSG_DONTWAIT);
 
       if (bytes_read == 0) {
         std::cout << "Client disconnected (FD: " << sock.get_fd() << ")\n";
@@ -186,47 +179,21 @@ public:
     }
   }
 
-  auto send_messages() -> void {
-    for (std::size_t i = 0; i < MSG_BATCH_SIZE; i++) {
-      const auto& maybe_msg = msg_server.reader.read();
-      if (!maybe_msg)
-        break;
+  auto send_message(const Net::MsgStruct& msg) -> void {
+    const auto& msg_str = msg.to_string();
 
-      const auto& msg = maybe_msg.value();
-      const auto& msg_str = msg.to_string();
+    std::cout << std::format("Sending -> Code: {}{}", msg.code,
+                             msg.payload ? "| Payload: " + msg.payload.value()
+                                         : "")
+              << std::endl;
 
-      std::cout << std::format("Sending -> Code: {}{}", msg.code,
-                               msg.payload ? "| Payload: " + msg.payload.value()
-                                           : "")
-                << std::endl;
-
-      const auto sent_bytes =
-          send(sock.get_fd(), msg_str.data(), msg_str.size(), 0);
-      if (sent_bytes < 0) {
-        std::cerr << "Send error, disconnecting client FD: " << sock.get_fd()
-                  << "\n";
-        disconnected = true;
-        return;
-      }
-    }
-  }
-
-  // Flush all pending messages
-  auto flush_messages() -> void {
-    while (true) {
-      const auto& maybe_msg = msg_server.reader.read();
-      if (!maybe_msg)
-        break;
-
-      const auto& msg = maybe_msg.value();
-      const auto& msg_str = msg.to_string();
-
-      if (send(sock.get_fd(), msg_str.data(), msg_str.size(), 0) < 0) {
-        std::cerr << "Send error, disconnecting client FD: " << sock.get_fd()
-                  << "\n";
-        disconnected = true;
-        return;
-      }
+    const auto sent_bytes =
+        send(sock.get_fd(), msg_str.data(), msg_str.size(), 0);
+    if (sent_bytes < 0) {
+      std::cerr << "Send error, disconnecting client FD: " << sock.get_fd()
+                << "\n";
+      disconnected = true;
+      return;
     }
   }
 

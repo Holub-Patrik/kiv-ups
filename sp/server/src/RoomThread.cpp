@@ -51,7 +51,7 @@ int RoomContext::count_active_players() const {
 void RoomContext::broadcast(const str_v& code, const opt<str>& payload) {
   for (auto& seat : seats) {
     if (seat.is_active()) {
-      seat.connection->msg_client.writer.wait_and_insert({str{code}, payload});
+      seat.connection->send_message({str{code}, payload});
     }
   }
 }
@@ -60,10 +60,26 @@ void RoomContext::send_to(int seat_idx, const str_v& code,
                           const opt<str>& payload) {
   if (seat_idx >= 0 && seat_idx < ROOM_MAX_PLAYERS &&
       seats[seat_idx].is_active()) {
-    seats[seat_idx].connection->msg_client.writer.wait_and_insert(
-        {str{code}, payload});
+    seats[seat_idx].connection->send_message({str{code}, payload});
   }
 }
+
+str RoomContext::serialize_compact() const {
+  using namespace Net::Serde;
+  std::stringstream ss{};
+
+  // I will only be sending active player information
+  // When a player joins, I should send exclusive broadcast to everyone else
+
+  ss << write_bg_int(count_active_players());
+  for (const auto& seat : seats) {
+    ss << write_net_str(seat.nickname) << write_bg_int(seat.chips);
+  }
+
+  return ss.str();
+}
+
+str RoomContext::serialize_full() const { return "To Be Specified"; }
 
 Room::Room(std::size_t id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
            std::mutex& return_mutex)
@@ -80,7 +96,6 @@ Room::~Room() {
 }
 
 void Room::accept_player(uq_ptr<PlayerInfo>&& p) {
-  p->msg_client.writer.wait_and_insert({str{Msg::RMST}, "ToBeSpecified"});
   {
     std::lock_guard g{incoming_mtx};
     incoming_queue.emplace_back(std::move(p));
@@ -168,6 +183,10 @@ void Room::process_incoming_players() {
         seat.connection = p.release();
         seat.connection->state = PlayerState::InRoom;
         seated = true;
+
+        // In this case chips have to be sent back to player
+        seat.connection->send_message(
+            Net::MsgStruct{"RMST", ctx.serialize_full()});
         break;
       }
     }
@@ -175,14 +194,17 @@ void Room::process_incoming_players() {
     if (!seated) {
       for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
         if (!ctx.seats[i].is_occupied) {
-          ctx.seats[i].is_occupied = true;
-          ctx.seats[i].nickname = p->nickname;
-          ctx.seats[i].connection = p.release();
-          ctx.seats[i].chips = 1000;
-          ctx.seats[i].connection->state = PlayerState::InRoom;
+          auto& seat = ctx.seats[i];
+          seat.is_occupied = true;
+          seat.nickname = p->nickname;
+          seat.chips = p->chips;
+          seat.connection = p.release();
+          seat.connection->state = PlayerState::InRoom;
           seated = true;
-          std::cout << std::format("New player {} at seat {}\n",
-                                   ctx.seats[i].nickname, i);
+          seat.connection->send_message(
+              Net::MsgStruct{"RMST", ctx.serialize_compact()});
+          std::cout << std::format("New player {} at seat {} ({}))\n",
+                                   ctx.seats[i].nickname, i, seat.chips);
           break;
         }
       }
@@ -211,7 +233,6 @@ void Room::process_network_io() {
   for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
     auto& seat = ctx.seats[i];
 
-    // Handle disconnections
     if (seat.is_occupied && seat.connection && seat.connection->disconnected) {
       std::cout << std::format("Player {} disconnected (seat {})\n",
                                seat.nickname, i);
@@ -221,11 +242,8 @@ void Room::process_network_io() {
       continue;
     }
 
-    // Process messages from active players
     if (seat.is_active()) {
       auto* p = seat.connection;
-      p->accept_messages();
-
       while (const auto& msg_opt = p->msg_client.reader.read()) {
         const auto& msg = msg_opt.value();
 
@@ -259,10 +277,6 @@ void Room::process_network_io() {
         if (current_state) {
           current_state->on_message(*this, ctx, i, msg);
         }
-      }
-
-      if (seat.connection) {
-        seat.connection->send_messages();
       }
     }
   }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <format>
 #include <iostream>
 #include <iterator>
 #include <optional>
