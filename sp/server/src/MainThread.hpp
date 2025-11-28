@@ -196,7 +196,7 @@ private:
   void handle_pinf(PlayerInfo& player, const str& payload) {
     // For now, we trust the client (no DB validation)
     // In future: verify player info structure
-    const auto& mb_chips = Net::Serde::read_bg_int(payload);
+    const auto& mb_chips = Net::Serde::read_var_int(payload);
     if (!mb_chips) {
       std::cout << "Player sent malformed chips" << std::endl;
       player.disconnected = true;

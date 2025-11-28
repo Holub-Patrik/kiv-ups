@@ -35,18 +35,33 @@ public:
   uint8_t draw();
   void reset();
 };
+enum class PlayerAction {
+  None = 0,
+  Check,
+  Call,
+  Fold,
+  Bet,
+  Left,
+};
+
 } // namespace GameUtils
 
 // Persistent data for a player slot
 struct PlayerSeat {
   bool is_occupied = false;
+
   str nickname;
   int chips = 1000;
   int current_bet = 0;
+
   bool is_folded = false;
   bool is_ready = false;
   bool showdowm_okay = false;
+
   vec<u8> hand;
+  // here so when sending room state to sync, we have round history
+  GameUtils::PlayerAction action_taken = GameUtils::PlayerAction::None;
+  usize action_amount = 0;
   PlayerInfo* connection = nullptr;
 
   void reset_round();
@@ -64,11 +79,12 @@ struct RoomContext {
   RoundPhase round_phase = RoundPhase::PreFlop;
 
   int count_active_players() const;
+  int count_occupied_seats() const;
   void broadcast(const str_v& code, const opt<str>& payload);
-  void broadcast_ex(int seat_idx, const str_v& code, const opt<str>& payload);
-  void send_to(int seat_idx, const str_v& code, const opt<str>& payload);
-  str serialize_compact() const;
-  str serialize_full() const;
+  void broadcast_ex(const int seat_idx, const str_v& code,
+                    const opt<str>& payload);
+  void send_to(const int seat_idx, const str_v& code, const opt<str>& payload);
+  str serialize(const int seat_idx) const;
 };
 
 // FSM Interface
@@ -169,6 +185,8 @@ private:
 
   void start_next_turn(RoomContext& ctx);
   void requeue_others(RoomContext&, int aggressor_idx);
+  opt<str> check_bet_conditions(const PlayerSeat& seat,
+                                const Net::MsgStruct& msg);
 
 public:
   void on_enter(Room& room, RoomContext& ctx) override;

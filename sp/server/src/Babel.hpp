@@ -62,6 +62,7 @@ cmp str_v JNFL = "JNFL"; // Server: Join failed
 cmp str_v RMST = "RMST"; // Server: Room state
 cmp str_v STOK = "STOK"; // Client: State OK
 cmp str_v STFL = "STFL"; // Client: State fail
+cmp str_v PJIN = "PJIN"; // Server: Player joined
 
 // In-room actions (Client -> Room)
 cmp str_v RDY1 = "RDY1"; // Client: Player ready
@@ -74,11 +75,13 @@ cmp str_v BETT = "BETT"; // Client: Bet amount
 // In-room responses (Room -> Client)
 cmp str_v PRDY = "PRDY"; // Server: Player X ready broadcast
 cmp str_v GMST = "GMST"; // Server: Game started (room locked)
+cmp str_v GMRD = "GMRD"; // Server: Game round
 cmp str_v CDTP = "CDTP"; // Server: Card to player (2 cards)
-cmp str_v PTRN = "PTRN"; // Server: Player X turn
+cmp str_v PTRN = "PTRN"; // Server: Player [Nick] turn
 cmp str_v ACOK = "ACOK"; // Server: Action OK
 cmp str_v ACFL = "ACFL"; // Server: Action failed
 cmp str_v NYET = "NYET"; // Server: Not your turn
+cmp str_v PACT = "PACT"; // Server: Player action (EBcast)
 
 // In-room responses (Client -> Room)
 cmp str_v CDOK = "CDOK";

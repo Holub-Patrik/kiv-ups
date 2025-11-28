@@ -6,59 +6,6 @@
 #include <string>
 #include <thread>
 
-class InternetMsg {
-public:
-  virtual ~InternetMsg() = default;
-
-  virtual std::string serialize() const noexcept = 0;
-  virtual void deserialize(const std::string& payload) = 0;
-  virtual bool is_correct() const noexcept = 0;
-};
-
-class FoldMsg final : public InternetMsg {
-private:
-  bool correct = false;
-
-public:
-  FoldMsg() = default;
-  ~FoldMsg() = default;
-
-  virtual std::string serialize() const noexcept override { return "PAF"; }
-
-  virtual void deserialize(const std::string& payload) override {
-    if (payload == "PAF}") {
-      correct = true;
-    } else {
-      correct = false;
-    }
-  }
-
-  virtual bool is_correct() const noexcept override { return correct; }
-};
-
-class BetMsg final : public InternetMsg {
-private:
-  bool correct = false;
-  long bet_amount = 0;
-
-public:
-  BetMsg() = default;
-  ~BetMsg() = default;
-
-  virtual std::string serialize() const noexcept override {
-    return std::to_string(bet_amount);
-  }
-  virtual void deserialize(const std::string& payload) override {
-    try {
-      bet_amount = std::stol(payload);
-      correct = true;
-    } catch (...) {
-      correct = false;
-    }
-  }
-  virtual bool is_correct() const noexcept override { return correct; }
-};
-
 int main(int argc, char* argv[]) {
   CB::Buffer<int, 3> buf;
   CB::Reader consumer{buf};

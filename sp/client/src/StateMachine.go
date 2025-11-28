@@ -127,7 +127,7 @@ func (s *StateReconnecting) Exit(ctx *ProgCtx) {}
 type StateSendingInfo struct{}
 
 func (s *StateSendingInfo) Enter(ctx *ProgCtx) {
-	chipStr, _ := unet.WriteBigInt(ctx.State.PlayerCfg.StartingChips)
+	chipStr, _ := unet.WriteVarInt(ctx.State.PlayerCfg.StartingChips)
 
 	ctx.NetMsgOutChan <- unet.NetMsg{Code: "PINF", Payload: chipStr}
 	fmt.Println("DFA: Sending Player Info...")
