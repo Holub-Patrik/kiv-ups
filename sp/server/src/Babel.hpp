@@ -28,6 +28,11 @@ template <typename T> using uq_ptr = std::unique_ptr<T>;
 
 constexpr std::nullopt_t null = std::nullopt;
 
+template <typename T, typename Arg>
+auto scast(Arg&& arg) -> decltype(static_cast<T>(std::forward<Arg>(arg))) {
+  return static_cast<T>(std::forward<Arg>(arg));
+}
+
 namespace Msg {
 // here so the comments can be next to messages
 #define cmp constexpr

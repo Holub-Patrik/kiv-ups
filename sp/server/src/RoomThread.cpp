@@ -2,7 +2,9 @@
 #include "Babel.hpp"
 #include "MessageSerde.hpp"
 #include "PlayerInfo.hpp"
+#include "PokerScoring.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 namespace GameUtils {
@@ -25,7 +27,10 @@ void Deck::reset() {
   std::iota(cards.begin(), cards.end(), 0);
   shuffle();
 }
+
 } // namespace GameUtils
+
+static const Scoring scoring{};
 
 void PlayerSeat::reset_round() { current_bet = 0; }
 
@@ -63,6 +68,19 @@ int RoomContext::count_occupied_seats() const {
 
 void RoomContext::broadcast(const str_v& code, const opt<str>& payload) {
   for (auto& seat : seats) {
+    if (seat.is_active()) {
+      seat.connection->send_message({str{code}, payload});
+    }
+  }
+}
+
+void RoomContext::broadcast_ex(const int seat_idx, const str_v& code,
+                               const opt<str>& payload) {
+  for (usize i = 0; seats.size(); i++) {
+    if (i == seat_idx) {
+      continue;
+    }
+    auto& seat = seats[i];
     if (seat.is_active()) {
       seat.connection->send_message({str{code}, payload});
     }
@@ -651,12 +669,20 @@ void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
   std::cout << "State: Enter Showdown" << std::endl;
 
   str payload = Net::Serde::write_sm_int(ctx.count_active_players());
-  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
-    // send information about disconnected players too
-    if (ctx.seats[i].is_occupied) {
-      payload += Net::Serde::write_net_str(ctx.seats[i].nickname);
-      payload +=
-          std::format("{:02}{:02}", ctx.seats[i].hand[0], ctx.seats[i].hand[1]);
+  std::vector<PokerScore> scores;
+  for (int i = 0; i < ctx.seats.size(); ++i) {
+    const auto& seat = ctx.seats[i];
+    if (seat.is_occupied) {
+      const arr<u8, 2> hand{seat.hand[0], seat.hand[1]};
+      const arr<u8, 5> river{
+          ctx.community_cards[0], ctx.community_cards[1],
+          ctx.community_cards[2], ctx.community_cards[3],
+          ctx.community_cards[4],
+      };
+      scores.emplace_back(
+          scoring.evaluate_poker_hand(std::move(hand), std::move(river)));
+      payload += Net::Serde::write_net_str(seat.nickname);
+      payload += std::format("{:02}{:02}", seat.hand[0], seat.hand[1]);
     }
   }
 
