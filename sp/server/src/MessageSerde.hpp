@@ -94,6 +94,26 @@ inline opt<std::pair<usize, usize>> read_bg_int(const str& payload,
   return pair{bg_int, bg_int_byte_count};
 }
 
+inline opt<std::pair<usize, i64>> read_var_int(const str& payload,
+                                               const usize begin_index = 0) {
+  const auto& mb_int_length = read_sm_int(payload, begin_index);
+  if (!mb_int_length) {
+    return null;
+  }
+
+  const auto& [int_length, bytes_read] = mb_int_length.value();
+  const auto& start = payload.begin() + bytes_read + begin_index;
+  const auto& end = start + int_length;
+
+  const auto& var_int_str = str{start, end};
+  try {
+    const auto var_int = static_cast<i64>(std::stoll(var_int_str));
+    return pair{var_int, bytes_read + int_length};
+  } catch (...) {
+    return null;
+  }
+}
+
 inline opt<std::pair<str, usize>> read_str(const str& payload,
                                            const usize begin_index = 0) {
   const auto& m_size = read_bg_int(payload, begin_index);
@@ -114,8 +134,17 @@ inline opt<std::pair<str, usize>> read_str(const str& payload,
   return pair{str{start, end}, total_bytes_read};
 }
 
+// All these function do not check number bounds, if numbers outside of their
+// capabilities are inserted, the protocol will most likely fail
 inline str write_sm_int(usize num) { return std::format("{:02d}", num); }
 inline str write_bg_int(usize num) { return std::format("{:04d}", num); }
+inline str write_var_int(i64 num) {
+  const auto abs_d_num = static_cast<double>(std::abs(num));
+  const auto log10_floor = std::floor(std::log10(abs_d_num) + 1);
+  const auto digit_count = static_cast<usize>(log10_floor + (num < 0 ? 1 : 0));
+
+  return std::format("{:04d}{:d}", digit_count, num);
+}
 inline str write_net_str(const str& usr_str) {
   return write_bg_int(usr_str.size()) + usr_str;
 }

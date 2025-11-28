@@ -2,6 +2,8 @@ package ups_net
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 )
 
@@ -273,6 +275,25 @@ func ReadString(slice []byte) (string, bool) {
 	return string(stringSlice), true
 }
 
+func ReadVarInt(slice []byte) (int64, bool) {
+	length, ok := ReadSmallInt(slice)
+	if !ok {
+		return 0, false
+	}
+
+	if len(slice) < 4+length {
+		return 0, false
+	}
+
+	intSlice := slice[4 : 4+length]
+	number, err := strconv.ParseInt(string(intSlice), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return number, true
+}
+
 func WriteSmallInt(num int) (string, bool) {
 	if num > 99 || num < 0 {
 		return "", false
@@ -287,6 +308,20 @@ func WriteBigInt(num int) (string, bool) {
 	}
 
 	return fmt.Sprintf("%04d", num), true
+}
+
+func WriteVarInt(num int) (string, bool) {
+	digitCount := int(math.Floor(math.Log10(math.Abs(float64(num)) + 1)))
+	if num < 1 {
+		digitCount += 1
+	}
+
+	digitCountStr, ok := WriteSmallInt(digitCount)
+	if !ok {
+		return "", false
+	}
+
+	return digitCountStr + fmt.Sprintf("%d", num), true
 }
 
 func WriteString(str string) (string, bool) {
