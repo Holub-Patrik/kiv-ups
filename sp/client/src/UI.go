@@ -100,7 +100,7 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	screen := w.NewGameScreen(10)
 	screenPanel := w.NewPanelComponent(rl.Color{R: 20, G: 80, B: 40, A: 255}, screen)
 
-	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.RoundBet)
+	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.CurrentBet)
 	screen.SetPotDisplay(pot)
 
 	screen.ResetRiver()
@@ -109,11 +109,29 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	}
 
 	screen.ResetOtherPlayers()
-	for id, player := range ctx.State.Table.Players {
-		if id == 0 {
-			continue
+
+	// Sort players by name for consistent display
+	var playerNames []string
+	for name := range ctx.State.Table.Players {
+		if name != ctx.State.Table.MyNickname {
+			playerNames = append(playerNames, name)
 		}
-		info := w.NewPlayerInfoComponent(player.Name, player.ChipCount, player.RoundBet, player.IsMyTurn)
+	}
+	sort.Strings(playerNames)
+
+	for _, name := range playerNames {
+		player := ctx.State.Table.Players[name]
+		info := w.NewPlayerInfoComponent(name, player.ChipCount, player.RoundBet, player.IsMyTurn)
+
+		// Show status if not active
+		if player.ActionTaken != "NONE" {
+			info.SetStatus(fmt.Sprintf("%s %d", player.ActionTaken, player.ActionAmount))
+		} else if player.IsFolded {
+			info.SetStatus("FOLDED")
+		} else if player.IsReady {
+			info.SetStatus("READY")
+		}
+
 		for _, c := range player.Cards {
 			if c.Hidden {
 				info.AddCard(buildHiddenCardComponent())
@@ -124,27 +142,43 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 		screen.AddOtherPlayer(w.NewBoundsBox(0.18, 0.8, info))
 	}
 
-	for _, card := range ctx.State.Table.MyHand {
+	myData, exists := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+	// fmt.Println(exists, myData.IsMyTurn, myData.IsFolded)
+
+	for _, card := range myData.Cards {
 		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
 	}
-	readyBtn := w.NewButtonComponent("Game_Ready", "Ready", 100, 50)
-	screen.AddActionButton(readyBtn)
 
-	checkBtn := w.NewButtonComponent("Game_Check", "Check", 100, 50)
-	screen.AddActionButton(checkBtn)
+	showActions := exists && myData.IsMyTurn && !myData.IsFolded
 
-	foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
-	screen.AddActionButton(foldBtn)
+	if !myData.IsReady {
+		readyBtn := w.NewButtonComponent("Game_Ready", "Ready", 100, 50)
+		screen.AddActionButton(readyBtn)
+	}
 
-	betStack := w.NewHStack(0)
-	betBox := w.NewTextBoxComponent("Game_BetAmount", &ctx.State.BetAmount, 6)
-	betBtn := w.NewButtonComponent("Game_Bet", "Bet", 100, 50)
-	betStack.AddChild(betBtn)
-	betStack.AddChild(betBox)
-	screen.AddActionButton(betStack)
+	if showActions {
+		if ctx.State.Table.CurrentBet == 0 {
+			checkBtn := w.NewButtonComponent("Game_Check", "Check", 100, 50)
+			screen.AddActionButton(checkBtn)
+		}
 
-	callBtn := w.NewButtonComponent("Game_Call", "Call", 100, 50)
-	screen.AddActionButton(callBtn)
+		if ctx.State.Table.CurrentBet > 0 {
+			callBtn := w.NewButtonComponent("Game_Call", fmt.Sprintf("Call %d", ctx.State.Table.CurrentBet), 100, 50)
+			screen.AddActionButton(callBtn)
+		}
+
+		foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
+		screen.AddActionButton(foldBtn)
+
+		if ctx.State.Table.CurrentBet == 0 {
+			betStack := w.NewHStack(0)
+			betBox := w.NewTextBoxComponent("Game_BetAmount", &ctx.State.BetAmount, 6)
+			betBtn := w.NewButtonComponent("Game_Bet", "Bet", 100, 50)
+			betStack.AddChild(betBtn)
+			betStack.AddChild(betBox)
+			screen.AddActionButton(betStack)
+		}
+	}
 
 	leaveBtn := w.NewButtonComponent("Game_Leave", "Leave", 100, 50)
 	screen.AddActionButton(leaveBtn)

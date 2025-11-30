@@ -278,19 +278,23 @@ func ReadString(slice []byte) (string, bool) {
 func ReadVarInt(slice []byte) (int64, bool) {
 	length, ok := ReadSmallInt(slice)
 	if !ok {
+		fmt.Println("Error during small int read")
 		return 0, false
 	}
 
-	if len(slice) < 4+length {
+	if len(slice) < 2+length {
+		fmt.Println("Error during len check")
 		return 0, false
 	}
 
-	intSlice := slice[4 : 4+length]
+	intSlice := slice[2 : 2+length]
 	number, err := strconv.ParseInt(string(intSlice), 10, 64)
 	if err != nil {
+		fmt.Println("Error during strconv")
 		return 0, false
 	}
 
+	fmt.Println("Read var int went ok")
 	return number, true
 }
 
@@ -311,9 +315,16 @@ func WriteBigInt(num int) (string, bool) {
 }
 
 func WriteVarInt(num int) (string, bool) {
-	digitCount := int(math.Floor(math.Log10(math.Abs(float64(num)) + 1)))
-	if num < 1 {
-		digitCount += 1
+	digitCount := 0
+	if num == 0 {
+		digitCount = 1
+	} else {
+		absNum := math.Abs(float64(num))
+		log10Floor := math.Floor(math.Log10(absNum)) + 1
+		digitCount = int(log10Floor)
+		if num < 1 {
+			digitCount += 1
+		}
 	}
 
 	digitCountStr, ok := WriteSmallInt(digitCount)

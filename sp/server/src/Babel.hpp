@@ -97,6 +97,11 @@ cmp str_v SDWN = "SDWN"; // Server: Showdown with all cards
 cmp str_v SDOK = "SDOK"; // Client: Showdown OK
 cmp str_v SDFL = "SDFL"; // Client: Showdown fail
 
+// Win (Server -> Client)
+cmp str_v GWIN = "GWIN"; // Server: Win with winner's nick
+cmp str_v GWOK = "GWOK"; // Client: Win OK
+cmp str_v GWFL = "GWFL"; // Client: Win fail
+
 // Game end (Server -> Client)
 cmp str_v GMDN = "GMDN"; // Server: Winner info
 cmp str_v DNOK = "DNOK"; // Client: Done OK

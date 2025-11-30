@@ -32,22 +32,24 @@ type Card struct {
 }
 
 type PlayerData struct {
-	Name      string
-	ChipCount int
-	Status    string
-	RoundBet  int // how much each player bet
-	Cards     []Card
-	IsMyTurn  bool
+	ChipCount    int
+	RoundBet     int
+	Cards        []Card
+	IsMyTurn     bool
+	IsFolded     bool
+	IsReady      bool
+	ActionTaken  string
+	ActionAmount int
 }
 
 type PokerTable struct {
-	MyHand         []Card
+	Players        map[string]PlayerData
 	CommunityCards []Card
-
-	Pot      int
-	RoundBet int // per round bet total, added to pot
-	MyTurn   bool
-	Players  map[int]PlayerData
+	Pot            int
+	RoundBet       int
+	CurrentBet     int
+	MyNickname     string
+	RoundPhase     string // "PreFlop", "Flop", "Turn", "River"
 }
 
 type PlayerConfig struct {
@@ -110,6 +112,7 @@ func (store *UIStore) SetDirty() {
 	store.MainMenu.dirty = true
 	store.ServerSelect.dirty = true
 	store.Connecting.dirty = true
+	store.Game.dirty = true
 }
 
 type ProgCtx struct {

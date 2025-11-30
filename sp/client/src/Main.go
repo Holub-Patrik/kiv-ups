@@ -76,6 +76,8 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	case "Game_Bet":
 		ctx.StateMutex.RLock()
 		betStr := strings.TrimSpace(ctx.State.BetAmount)
+		myNickname := ctx.State.Table.MyNickname
+		table := ctx.State.Table
 		ctx.StateMutex.RUnlock()
 
 		if betStr == "" {
@@ -86,6 +88,22 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 		amount, err := strconv.Atoi(betStr)
 		if err != nil || amount <= 0 {
 			ctx.Popup.AddPopup("Invalid amount (use numbers only)", time.Second*2)
+			return
+		}
+
+		myData, exists := table.Players[myNickname]
+		if !exists {
+			ctx.Popup.AddPopup("Error: Player data not found", time.Second*3)
+			return
+		}
+
+		if amount > myData.ChipCount {
+			ctx.Popup.AddPopup(fmt.Sprintf("You only have %d chips", myData.ChipCount), time.Second*3)
+			return
+		}
+
+		if amount < table.CurrentBet {
+			ctx.Popup.AddPopup(fmt.Sprintf("Bet must be at least %d", table.CurrentBet), time.Second*3)
 			return
 		}
 

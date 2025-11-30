@@ -12,6 +12,7 @@ type PlayerInfoComponent struct {
 	RoundBet   int
 	IsMyTurn   bool
 	cards      []RGComponent
+	status     string
 }
 
 func NewPlayerInfoComponent(name string, chips, roundBet int, isMyTurn bool) *PlayerInfoComponent {
@@ -21,11 +22,16 @@ func NewPlayerInfoComponent(name string, chips, roundBet int, isMyTurn bool) *Pl
 		RoundBet:   roundBet,
 		IsMyTurn:   isMyTurn,
 		cards:      make([]RGComponent, 0),
+		status:     "None",
 	}
 }
 
 func (p *PlayerInfoComponent) AddCard(card RGComponent) {
 	p.cards = append(p.cards, card)
+}
+
+func (p *PlayerInfoComponent) SetStatus(status string) {
+	p.status = status
 }
 
 func (p *PlayerInfoComponent) Calculate(bounds rl.Rectangle) {
@@ -76,6 +82,4 @@ func (p *PlayerInfoComponent) GetBounds() rl.Rectangle {
 	return p.bounds
 }
 
-func (p *PlayerInfoComponent) Rebuild(old RGComponent) {
-	/* noop since threre is no child and no persistent state */
-}
+func (p *PlayerInfoComponent) Rebuild(old RGComponent) {}

@@ -44,14 +44,16 @@ public:
   Net::Serde::MainParser parser{};
   RemoteSocket sock;
 
-  virtual ~PlayerInfo() { send_t.join(); }
+  virtual ~PlayerInfo() {
+    sock.close_fd();
+    send_t.join();
+  }
 
   PlayerInfo(const ServerSocket& server_sock)
       : sock(server_sock), msg_server(msg_buf), msg_client(msg_buf) {
     send_t = std::thread{&PlayerInfo::accept_messages, this};
   }
 
-  // Reset all connection-specific state
   void reset() {
     invalid_msg_count = 0;
     room_send_index = 0;
@@ -60,7 +62,6 @@ public:
 
   void clear_ping() { ping_received = false; }
   bool get_ping() const noexcept { return ping_received; }
-  // bypass to send a ping message immedietly
   void send_ping() {
     const auto msg = Net::MsgStruct{"PING", null};
     const auto& msg_str = msg.to_string();
@@ -87,7 +88,8 @@ public:
         disconnected = true;
         break;
       } else if (bytes_read < 0) {
-        break; // No data or error
+        std::cout << "Read error" << std::endl;
+        break; // error
       }
 
       std::cout << "Received " << bytes_read << " bytes on FD " << sock.get_fd()
@@ -146,10 +148,8 @@ public:
         }
 
         if (results.parser_done) {
-          // Valid message - reset error counter
           invalid_msg_count = 0;
 
-          // Extract payload if present
           opt<str> payload = null;
           if (results.type == Net::Serde::MsgType::Payload && results.payload) {
             payload = results.payload;
@@ -160,11 +160,9 @@ public:
                                            : "")
                     << std::endl;
 
-          // ping shortcut so server logic can just check if it came
           if (results.code == "PING") {
             ping_received = true;
           } else {
-            // Insert into message queue for processing
             msg_server.writer.wait_and_insert(
                 Net::MsgStruct{results.code, payload});
           }

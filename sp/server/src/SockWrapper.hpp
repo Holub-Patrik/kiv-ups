@@ -108,13 +108,22 @@ public:
 
 class RemoteSocket final {
 private:
+  bool closed = false;
   int sock_fd;
   struct sockaddr_in addr;
   socklen_t addr_len;
 
+  void close_fd_internal() {
+    if (!closed) {
+      closed = true;
+      shutdown(sock_fd, SHUT_RDWR);
+      close(sock_fd);
+    }
+  }
+
 public:
   ~RemoteSocket() {
-    close(sock_fd);
+    close_fd_internal();
     std::cout << "Closed socket: " << sock_fd << std::endl;
   }
 
@@ -124,17 +133,6 @@ public:
     if (accepted_sock <= 0) {
       throw SocketException{SocketExceptionType::ACCEPT};
     }
-
-    /*
-    // If O_NONBLOCK is set, the socket blocks, I have no idea why
-    // Also the blocking behaviour happens on read and recv
-    int flags = fcntl(sock_fd, F_GETFL, 0);
-    if (flags < 0) {
-      throw SocketException{SocketExceptionType::SETSOCKOPT};
-    }
-    if (fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-      throw SocketException{SocketExceptionType::SETSOCKOPT};
-    } */
 
     sock_fd = accepted_sock;
   }
@@ -162,4 +160,5 @@ public:
   }
 
   int get_fd() const noexcept { return sock_fd; }
+  void close_fd() { close_fd_internal(); }
 };

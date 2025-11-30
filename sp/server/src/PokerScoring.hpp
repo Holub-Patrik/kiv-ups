@@ -8,8 +8,9 @@ struct PokerScore {
   arr<u8, 5> tie_breakers = {0, 0, 0, 0, 0};
 
   bool operator<(const PokerScore& o) const noexcept {
-    if (category != o.category)
+    if (category != o.category) {
       return category < o.category;
+    }
     return tie_breakers < o.tie_breakers;
   }
   bool operator==(const PokerScore& o) const noexcept = default;
@@ -29,9 +30,12 @@ struct Counts {
       rank[rank_of(c)]++;
       suit[suit_of(c)]++;
     }
-    for (int r = 0; r < 13; ++r)
-      if (rank[r] >= 2 && rank[r] <= 4)
+
+    for (int r = 0; r < 13; ++r) {
+      if (rank[r] >= 2 && rank[r] <= 4) {
         freq[rank[r]]++;
+      }
+    }
   }
 };
 

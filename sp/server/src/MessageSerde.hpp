@@ -139,11 +139,17 @@ inline opt<std::pair<str, usize>> read_str(const str& payload,
 inline str write_sm_int(usize num) { return std::format("{:02d}", num); }
 inline str write_bg_int(usize num) { return std::format("{:04d}", num); }
 inline str write_var_int(i64 num) {
+  if (num == 0) {
+    return write_sm_int(1) + std::format("{:d}", num);
+  }
   const auto abs_d_num = static_cast<double>(std::abs(num));
-  const auto log10_floor = std::floor(std::log10(abs_d_num) + 1);
+  const auto log10_floor = std::floor(std::log10(abs_d_num)) + 1;
   const auto digit_count = static_cast<usize>(log10_floor + (num < 0 ? 1 : 0));
+  std::cout << std::format("What? {} {} {} {}", num, abs_d_num, log10_floor,
+                           digit_count)
+            << std::endl;
 
-  return std::format("{:04d}{:d}", digit_count, num);
+  return write_sm_int(digit_count) + std::format("{:d}", num);
 }
 inline str write_net_str(const str& usr_str) {
   return write_bg_int(usr_str.size()) + usr_str;

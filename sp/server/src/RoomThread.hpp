@@ -59,22 +59,21 @@ struct PlayerSeat {
   bool showdowm_okay = false;
 
   vec<u8> hand;
-  // here so when sending room state to sync, we have round history
   GameUtils::PlayerAction action_taken = GameUtils::PlayerAction::None;
   usize action_amount = 0;
-  PlayerInfo* connection = nullptr;
+  uq_ptr<PlayerInfo> connection = nullptr;
 
   void reset_round();
   void reset_game();
   bool is_active() const;
 };
 
-// Shared Context Data (The "Board")
 struct RoomContext {
   std::array<PlayerSeat, ROOM_MAX_PLAYERS> seats;
   GameUtils::Deck deck;
   vec<u8> community_cards;
   int pot = 0;
+  int current_high_bet = 0;
   int dealer_idx = 0;
   RoundPhase round_phase = RoundPhase::PreFlop;
 
@@ -87,7 +86,6 @@ struct RoomContext {
   str serialize(const int seat_idx) const;
 };
 
-// FSM Interface
 class RoomState {
 public:
   virtual ~RoomState() = default;
@@ -180,7 +178,6 @@ class BettingState : public RoomState {
 private:
   std::deque<int> action_queue;
   int current_actor = -1;
-  int current_high_bet = 0;
   bool has_bet_occurred = false;
 
   void start_next_turn(RoomContext& ctx);
