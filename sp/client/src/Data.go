@@ -34,6 +34,7 @@ type Card struct {
 type PlayerData struct {
 	ChipCount    int
 	RoundBet     int
+	TotalBet     int
 	Cards        []Card
 	IsMyTurn     bool
 	IsFolded     bool
@@ -46,8 +47,7 @@ type PokerTable struct {
 	Players        map[string]PlayerData
 	CommunityCards []Card
 	Pot            int
-	RoundBet       int
-	CurrentBet     int
+	HighBet        int
 	MyNickname     string
 	RoundPhase     string // "PreFlop", "Flop", "Turn", "River"
 }
@@ -70,6 +70,7 @@ type GameState struct {
 
 	Table     PokerTable
 	BetAmount string
+	Showdown  bool
 }
 
 type UserInputEvent any

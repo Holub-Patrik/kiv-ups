@@ -52,7 +52,8 @@ struct PlayerSeat {
 
   str nickname;
   int chips = 1000;
-  int current_bet = 0;
+  int round_bet = 0;
+  int total_bet = 0;
 
   bool is_folded = false;
   bool is_ready = false;
@@ -75,6 +76,7 @@ struct RoomContext {
   int pot = 0;
   int current_high_bet = 0;
   int dealer_idx = 0;
+  int current_actor = -1;
   RoundPhase round_phase = RoundPhase::PreFlop;
 
   int count_active_players() const;
@@ -83,7 +85,7 @@ struct RoomContext {
   void broadcast_ex(const int seat_idx, const str_v& code,
                     const opt<str>& payload);
   void send_to(const int seat_idx, const str_v& code, const opt<str>& payload);
-  str serialize(const int seat_idx) const;
+  str serialize() const;
 };
 
 class RoomState {
@@ -177,7 +179,6 @@ public:
 class BettingState : public RoomState {
 private:
   std::deque<int> action_queue;
-  int current_actor = -1;
   bool has_bet_occurred = false;
 
   void start_next_turn(RoomContext& ctx);

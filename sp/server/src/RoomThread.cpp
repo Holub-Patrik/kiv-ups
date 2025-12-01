@@ -32,13 +32,14 @@ void Deck::reset() {
 
 static const Scoring scoring{};
 
-void PlayerSeat::reset_round() { current_bet = 0; }
+void PlayerSeat::reset_round() { round_bet = 0; }
 
 void PlayerSeat::reset_game() {
   is_folded = false;
   is_ready = false;
   showdowm_okay = false;
-  current_bet = 0;
+  round_bet = 0;
+  total_bet = 0;
   hand.clear();
 }
 
@@ -91,39 +92,39 @@ void RoomContext::broadcast_ex(const int seat_idx, const str_v& code,
 
 void RoomContext::send_to(int seat_idx, const str_v& code,
                           const opt<str>& payload) {
-  if (seat_idx >= 0 && seat_idx < ROOM_MAX_PLAYERS &&
-      seats[seat_idx].is_active()) {
+  if (seat_idx >= 0 && seat_idx < seats.size() && seats[seat_idx].is_active()) {
     seats[seat_idx].connection->send_message({str{code}, payload});
   }
 }
 
-str RoomContext::serialize(const int seat_idx = -1) const {
+static str ser_player(const int& seat_idx, const RoomContext& ctx) {
+  std::stringstream ss;
+  using namespace Net::Serde;
+  const auto& seat = ctx.seats[seat_idx];
+  ss << write_net_str(seat.nickname);
+  ss << write_var_int(seat.chips);
+  ss << write_sm_int(seat.is_folded ? 1 : 0);
+  ss << write_sm_int(seat.is_ready ? 1 : 0);
+  ss << write_sm_int(seat_idx == ctx.current_actor ? 1 : 0);
+  std::cout << std::format("Senging turn {}: {}", seat.nickname,
+                           seat_idx == ctx.current_actor ? "True" : "False");
+  ss << write_sm_int(static_cast<u8>(seat.action_taken));
+  ss << write_var_int(seat.action_amount);
+  ss << write_var_int(seat.round_bet);
+  ss << write_var_int(seat.total_bet);
+  return ss.str();
+}
+
+str RoomContext::serialize() const {
   using namespace Net::Serde;
   std::stringstream ss{};
 
-  // I will only be sending occupied seats
-  // Before game start, active == occupied, but in game this does not hold true
-  // I need to send information about disconnected players
-  // TODO: When a player joins, I should send exclusive broadcast to everyone
-  // else
-
-  // I am sending this information to an active player, so he shouldn't be
-  // counted in
   ss << write_var_int(pot);
   ss << write_var_int(current_high_bet);
   ss << write_sm_int(community_cards.size());
+
   for (const auto& card : community_cards) {
     ss << write_sm_int(card);
-  }
-
-  if (seat_idx < 0) {
-    std::cout << "Adding player info" << std::endl;
-    const auto& seat = seats[seat_idx];
-    ss << write_var_int(seat.chips);
-    ss << write_sm_int(seat.is_folded ? 1 : 0);
-    ss << write_sm_int(seat.is_ready ? 1 : 0);
-    ss << write_sm_int(static_cast<u8>(seat.action_taken));
-    ss << write_var_int(static_cast<u8>(seat.action_amount));
   }
 
   ss << write_sm_int(count_occupied_seats());
@@ -131,18 +132,7 @@ str RoomContext::serialize(const int seat_idx = -1) const {
     if (!seats[i].is_occupied) {
       continue;
     }
-
-    if (seat_idx == i) {
-      continue;
-    }
-
-    const auto& seat = seats[i];
-    ss << write_net_str(seat.nickname);
-    ss << write_var_int(seat.chips);
-    ss << write_sm_int(seat.is_folded ? 1 : 0);
-    ss << write_sm_int(seat.is_ready ? 1 : 0);
-    ss << write_sm_int(static_cast<u8>(seat.action_taken));
-    ss << write_var_int(static_cast<u8>(seat.action_amount));
+    ss << ser_player(i, *this);
   }
 
   return ss.str();
@@ -256,9 +246,7 @@ void Room::process_incoming_players() {
         // No argument means that the player themselves will be included in the
         // message
         seat.connection->send_message(Net::MsgStruct{"RMST", ctx.serialize()});
-        ctx.broadcast_ex(seat_idx, Msg::PJIN,
-                         Net::Serde::write_net_str(seat.nickname) +
-                             Net::Serde::write_var_int(seat.chips));
+        ctx.broadcast_ex(seat_idx, Msg::PJIN, ser_player(seat_idx, ctx));
         break;
       }
     }
@@ -274,11 +262,9 @@ void Room::process_incoming_players() {
           seated = true;
 
           seat.connection->send_message(
-              Net::MsgStruct{"RMST", ctx.serialize(i)});
+              Net::MsgStruct{"RMST", ctx.serialize()});
 
-          ctx.broadcast_ex(i, Msg::PJIN,
-                           Net::Serde::write_net_str(seat.nickname) +
-                               Net::Serde::write_var_int(seat.chips));
+          ctx.broadcast_ex(i, Msg::PJIN, ser_player(i, ctx));
           std::cout << std::format("New player {} at seat {} ({}))\n",
                                    ctx.seats[i].nickname, i, seat.chips);
 
@@ -324,6 +310,15 @@ void Room::process_network_io() {
       while (const auto& msg_opt = p->msg_client.reader.read()) {
         const auto& msg = msg_opt.value();
 
+        // Validate message code
+        if (!is_valid_room_code(msg.code)) {
+          std::cerr << std::format(
+              "Unknown room message {} from {}, disconnecting\n", msg.code,
+              seat.nickname);
+          p->disconnected = true;
+          break;
+        }
+
         // Global leave command
         if (msg.code == Msg::GMLV) {
           std::cout << std::format("Player {} leaving room\n", seat.nickname);
@@ -338,6 +333,7 @@ void Room::process_network_io() {
             std::lock_guard lg{return_mtx};
             p->state = PlayerState::AwaitingJoin;
             return_arr.emplace_back(std::move(p));
+            std::cout << "Player Moved back to Main Thread" << std::endl;
           }
 
           seat.connection = nullptr;
@@ -347,15 +343,6 @@ void Room::process_network_io() {
           }
           ctx.broadcast_ex(i, Msg::PACT, act_str);
 
-          break;
-        }
-
-        // Validate message code
-        if (!is_valid_room_code(msg.code)) {
-          std::cerr << std::format(
-              "Unknown room message {} from {}, disconnecting\n", msg.code,
-              seat.nickname);
-          p->disconnected = true;
           break;
         }
 
@@ -505,7 +492,8 @@ void BettingState::on_enter(Room& room, RoomContext& ctx) {
   ctx.broadcast(Msg::GMRD, null);
 
   for (auto& s : ctx.seats) {
-    s.current_bet = 0;
+    s.total_bet += s.round_bet;
+    s.round_bet = 0;
     s.action_amount = 0;
     // do not reset history for players who left or folded
     if (s.action_taken == GameUtils::PlayerAction::Left ||
@@ -525,7 +513,7 @@ void BettingState::on_enter(Room& room, RoomContext& ctx) {
   }
 
   if (action_queue.empty()) {
-    current_actor = -1;
+    ctx.current_actor = -1;
   } else {
     start_next_turn(ctx);
   }
@@ -533,23 +521,23 @@ void BettingState::on_enter(Room& room, RoomContext& ctx) {
 
 void BettingState::start_next_turn(RoomContext& ctx) {
   if (action_queue.empty()) {
-    current_actor = -1;
+    ctx.current_actor = -1;
     return;
   }
 
-  current_actor = action_queue.front();
+  ctx.current_actor = action_queue.front();
   action_queue.pop_front();
 
-  if (!ctx.seats[current_actor].is_active() ||
-      ctx.seats[current_actor].is_folded) {
+  if (!ctx.seats[ctx.current_actor].is_active() ||
+      ctx.seats[ctx.current_actor].is_folded) {
     start_next_turn(ctx);
     return;
   }
 
-  std::cout << std::format("Turn: Seat {} ({})\n", current_actor,
-                           ctx.seats[current_actor].nickname);
-  ctx.broadcast(Msg::PTRN,
-                Net::Serde::write_net_str(ctx.seats[current_actor].nickname));
+  std::cout << std::format("Turn: Seat {} ({})\n", ctx.current_actor,
+                           ctx.seats[ctx.current_actor].nickname);
+  ctx.broadcast(Msg::PTRN, Net::Serde::write_net_str(
+                               ctx.seats[ctx.current_actor].nickname));
 }
 
 void BettingState::requeue_others(RoomContext& ctx, int aggressor_idx) {
@@ -572,7 +560,7 @@ void BettingState::on_leave(Room& room, RoomContext& ctx) {
 }
 
 void BettingState::on_tick(Room& room, RoomContext& ctx) {
-  if (current_actor == -1) {
+  if (ctx.current_actor == -1) {
     if (ctx.round_phase == RoundPhase::River) {
       room.transition_to<ShowdownState>();
     } else {
@@ -613,7 +601,7 @@ opt<str> BettingState::check_bet_conditions(const PlayerSeat& seat,
 
 void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
                               const Net::MsgStruct& msg) {
-  if (seat_idx != current_actor) {
+  if (seat_idx != ctx.current_actor) {
     ctx.send_to(seat_idx, Msg::NYET, null);
     return;
   }
@@ -631,7 +619,7 @@ void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
     turn_completed = true;
     std::cout << std::format("Player {} folded\n", seat.nickname);
   } else if (msg.code == Msg::CHCK) {
-    if (ctx.current_high_bet > seat.current_bet) {
+    if (ctx.current_high_bet > seat.round_bet) {
       ctx.send_to(seat_idx, Msg::ACFL, "Cannot check, must call");
     } else {
       seat.action_taken = GameUtils::PlayerAction::Check;
@@ -651,7 +639,7 @@ void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
       seat.action_taken = GameUtils::PlayerAction::Bet;
       seat.action_amount = amount;
       ctx.current_high_bet = amount;
-      seat.current_bet = amount;
+      seat.round_bet = amount;
       seat.chips -= amount;
       ctx.pot += amount;
       has_bet_occurred = true;
@@ -669,7 +657,7 @@ void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
     const auto chip_amount =
         ctx.current_high_bet > seat.chips ? seat.chips : ctx.current_high_bet;
     seat.chips -= chip_amount;
-    seat.current_bet += chip_amount;
+    seat.round_bet += chip_amount;
     ctx.pot += chip_amount;
     seat.action_taken = GameUtils::PlayerAction::Call;
     seat.action_amount = chip_amount;
@@ -725,7 +713,8 @@ void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
 
   const auto& [winner_score, winner_nick] = scores[0];
 
-  const str winner_payload = Net::Serde::write_net_str(winner_nick);
+  const str winner_payload = Net::Serde::write_net_str(winner_nick) +
+                             Net::Serde::write_var_int(ctx.pot);
 
   ctx.broadcast(Msg::SDWN, payload);
   ctx.broadcast(Msg::GWIN, winner_payload);

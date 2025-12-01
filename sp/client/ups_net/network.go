@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,9 +27,10 @@ type NetMsg struct {
 // opening/closing socket
 // This has to be included within the Game Thread so it can ask for messages from the network thread
 type NetHandler struct {
-	conn   net.Conn
-	msgIn  chan NetMsg
-	msgOut chan NetMsg
+	conn    net.Conn
+	msgIn   chan NetMsg
+	msgOut  chan NetMsg
+	closing atomic.Bool
 
 	wg sync.WaitGroup
 }
@@ -76,24 +78,36 @@ func (nh *NetHandler) Connect(host string, port string) bool {
 func (nh *NetHandler) Disconnect() {
 	fmt.Println("NetHandler: Disconnecting...")
 
-	// this should stop sender
-	if nh.msgOut != nil {
-		close(nh.msgOut)
-		nh.msgOut = nil
-	}
+	// an atomic closing check to prevent race conditions
+	// namely there were issues with the nil checks where multiple
+	// threads managed to get into the if and close connections/channels
+	closing := nh.closing.Load()
+	swapped := nh.closing.CompareAndSwap(closing, true)
 
-	// this should stop receiver
-	if nh.conn != nil {
-		nh.conn.Close()
-		nh.conn = nil
-	}
+	if !swapped {
+		// a true has been set from another thread
+		// so a closing operation is already in process
+		nh.wg.Wait()
+	} else {
+		// this should stop sender
+		if nh.msgOut != nil {
+			close(nh.msgOut)
+			nh.msgOut = nil
+		}
 
-	// if both threads are already dead, this should be noop
-	nh.wg.Wait()
+		// this should stop receiver
+		if nh.conn != nil {
+			nh.conn.Close()
+			nh.conn = nil
+		}
 
-	if nh.msgIn != nil {
-		close(nh.msgIn)
-		nh.msgIn = nil
+		// if both threads are already dead, this should be noop
+		nh.wg.Wait()
+
+		if nh.msgIn != nil {
+			close(nh.msgIn)
+			nh.msgIn = nil
+		}
 	}
 
 	fmt.Println("NetHandler: Disconnected")
@@ -224,7 +238,13 @@ func (self *MsgAcceptor) AcceptMessages() {
 					code_msg = "Payload: " + results.payload
 				}
 				fmt.Println("Parsed correct message <- Code:", results.code, code_msg)
-				self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
+
+				if results.code == "PING" {
+					self.nh.msgOut <- NetMsg{Code: "PING"}
+				} else {
+					self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
+				}
+
 				total_parsed_bytes += results.BytesParsed
 				parser.ResetParser()
 				continue

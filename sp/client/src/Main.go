@@ -102,8 +102,9 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 			return
 		}
 
-		if amount < table.CurrentBet {
-			ctx.Popup.AddPopup(fmt.Sprintf("Bet must be at least %d", table.CurrentBet), time.Second*3)
+		netStr, ok := unet.WriteVarInt(amount)
+		if !ok {
+			ctx.Popup.AddPopup("Bet amount is invalid", time.Second*2)
 			return
 		}
 
@@ -111,7 +112,7 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 		ctx.State.BetAmount = ""
 		ctx.StateMutex.Unlock()
 
-		ctx.UserInputChan <- EvtGameAction{Action: "BETT", Amount: fmt.Sprintf("%04d", amount)}
+		ctx.UserInputChan <- EvtGameAction{Action: "BETT", Amount: netStr}
 
 	case "Game_Ready":
 		ctx.UserInputChan <- EvtGameAction{Action: "RDY1"}
@@ -127,6 +128,9 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 
 	case "Game_Call":
 		ctx.UserInputChan <- EvtGameAction{Action: "CALL"}
+
+	case "Game_ShowOK":
+		ctx.UserInputChan <- EvtGameAction{Action: "SDOK"}
 
 	default:
 		after, found := strings.CutPrefix(event.SourceID, "join_")

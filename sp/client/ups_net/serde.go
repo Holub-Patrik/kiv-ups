@@ -276,6 +276,8 @@ func ReadString(slice []byte) (string, bool) {
 }
 
 func ReadVarInt(slice []byte) (int64, bool) {
+	fmt.Println("RVI: Reading part: ", string(slice))
+
 	length, ok := ReadSmallInt(slice)
 	if !ok {
 		fmt.Println("Error during small int read")
@@ -314,7 +316,7 @@ func WriteBigInt(num int) (string, bool) {
 	return fmt.Sprintf("%04d", num), true
 }
 
-func WriteVarInt(num int) (string, bool) {
+func countDigits(num int) int {
 	digitCount := 0
 	if num == 0 {
 		digitCount = 1
@@ -326,7 +328,11 @@ func WriteVarInt(num int) (string, bool) {
 			digitCount += 1
 		}
 	}
+	return digitCount
+}
 
+func WriteVarInt(num int) (string, bool) {
+	digitCount := countDigits(num)
 	digitCountStr, ok := WriteSmallInt(digitCount)
 	if !ok {
 		return "", false
@@ -342,4 +348,57 @@ func WriteString(str string) (string, bool) {
 	}
 
 	return lenStr + str, true
+}
+
+type ParseTypes = int
+
+const (
+	SmallInt ParseTypes = iota
+	BigInt
+	VarInt
+	String
+)
+
+func ParseMessage(payload string, types []ParseTypes) ([]any, int, error) {
+	bytePayload := []byte(payload)
+	offset := 0
+	res := make([]any, len(types))
+
+	for index, pType := range types {
+		switch pType {
+		case SmallInt:
+			parseResult, ok := ReadSmallInt(bytePayload[offset:])
+			if !ok {
+				return res, offset, fmt.Errorf("Failed when reading small int")
+			}
+			res[index] = int(parseResult)
+			offset += 2
+
+		case BigInt:
+			parseResult, ok := ReadBigInt(bytePayload[offset:])
+			if !ok {
+				return res, offset, fmt.Errorf("Failed when reading big int")
+			}
+			res[index] = int(parseResult)
+			offset += 4
+
+		case VarInt:
+			parseResult, ok := ReadVarInt(bytePayload[offset:])
+			if !ok {
+				return res, offset, fmt.Errorf("Failed when reading small int")
+			}
+			res[index] = int(parseResult)
+			offset += 2 + countDigits(int(parseResult))
+
+		case String:
+			parseResult, ok := ReadString(bytePayload[offset:])
+			if !ok {
+				return res, offset, fmt.Errorf("Failed when reading small int")
+			}
+			res[index] = parseResult
+			offset += 4 + len(parseResult)
+		}
+	}
+
+	return res, offset, nil
 }

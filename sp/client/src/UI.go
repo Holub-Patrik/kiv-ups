@@ -100,7 +100,7 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	screen := w.NewGameScreen(10)
 	screenPanel := w.NewPanelComponent(rl.Color{R: 20, G: 80, B: 40, A: 255}, screen)
 
-	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.CurrentBet)
+	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.HighBet)
 	screen.SetPotDisplay(pot)
 
 	screen.ResetRiver()
@@ -121,15 +121,20 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 
 	for _, name := range playerNames {
 		player := ctx.State.Table.Players[name]
-		info := w.NewPlayerInfoComponent(name, player.ChipCount, player.RoundBet, player.IsMyTurn)
+		info := w.NewPlayerInfoComponent(player.IsMyTurn)
+		info.AddDesc(w.NewLabelComponent(name, 12, rl.White))
+		info.AddDesc(w.NewLabelComponent(fmt.Sprintf("Chips: %d", player.ChipCount), 12, rl.Yellow))
+		if player.TotalBet > 0 {
+			info.AddDesc(w.NewLabelComponent(fmt.Sprintf("Total Bet: %d", player.TotalBet), 12, rl.Orange))
+		}
 
 		// Show status if not active
 		if player.ActionTaken != "NONE" {
-			info.SetStatus(fmt.Sprintf("%s %d", player.ActionTaken, player.ActionAmount))
+			info.AddDesc(w.NewLabelComponent(fmt.Sprintf("%s %d", player.ActionTaken, player.ActionAmount), 12, rl.White))
 		} else if player.IsFolded {
-			info.SetStatus("FOLDED")
+			info.AddDesc(w.NewLabelComponent("Folded", 12, rl.White))
 		} else if player.IsReady {
-			info.SetStatus("READY")
+			info.AddDesc(w.NewLabelComponent("Ready", 12, rl.White))
 		}
 
 		for _, c := range player.Cards {
@@ -139,11 +144,10 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 				info.AddCard(buildCardComponent(c.Symbol, rl.RayWhite))
 			}
 		}
-		screen.AddOtherPlayer(w.NewBoundsBox(0.18, 0.8, info))
+		screen.AddOtherPlayer(info)
 	}
 
 	myData, exists := ctx.State.Table.Players[ctx.State.Table.MyNickname]
-	// fmt.Println(exists, myData.IsMyTurn, myData.IsFolded)
 
 	for _, card := range myData.Cards {
 		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
@@ -156,27 +160,30 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 		screen.AddActionButton(readyBtn)
 	}
 
-	if showActions {
-		if ctx.State.Table.CurrentBet == 0 {
-			checkBtn := w.NewButtonComponent("Game_Check", "Check", 100, 50)
-			screen.AddActionButton(checkBtn)
-		}
+	if ctx.State.Showdown {
+		showdownOkBtn := w.NewButtonComponent("Game_ShowOK", "OK", 100, 50)
+		screen.AddActionButton(showdownOkBtn)
+	} else {
+		if showActions {
+			if ctx.State.Table.HighBet == 0 {
+				checkBtn := w.NewButtonComponent("Game_Check", "Check", 100, 50)
+				screen.AddActionButton(checkBtn)
 
-		if ctx.State.Table.CurrentBet > 0 {
-			callBtn := w.NewButtonComponent("Game_Call", fmt.Sprintf("Call %d", ctx.State.Table.CurrentBet), 100, 50)
-			screen.AddActionButton(callBtn)
-		}
+				betStack := w.NewHStack(0)
+				betBox := w.NewTextBoxComponent("Game_BetAmount", &ctx.State.BetAmount, 6)
+				betBtn := w.NewButtonComponent("Game_Bet", "Bet", 100, 50)
+				betStack.AddChild(betBtn)
+				betStack.AddChild(betBox)
+				screen.AddActionButton(betStack)
+			}
 
-		foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
-		screen.AddActionButton(foldBtn)
+			if ctx.State.Table.HighBet > 0 {
+				callBtn := w.NewButtonComponent("Game_Call", fmt.Sprintf("Call %d", ctx.State.Table.HighBet), 100, 50)
+				screen.AddActionButton(callBtn)
+			}
 
-		if ctx.State.Table.CurrentBet == 0 {
-			betStack := w.NewHStack(0)
-			betBox := w.NewTextBoxComponent("Game_BetAmount", &ctx.State.BetAmount, 6)
-			betBtn := w.NewButtonComponent("Game_Bet", "Bet", 100, 50)
-			betStack.AddChild(betBtn)
-			betStack.AddChild(betBox)
-			screen.AddActionButton(betStack)
+			foldBtn := w.NewButtonComponent("Game_Fold", "Fold", 100, 50)
+			screen.AddActionButton(foldBtn)
 		}
 	}
 

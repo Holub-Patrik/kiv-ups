@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	unet "poker-client/ups_net"
@@ -250,8 +249,7 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicSta
 	case "RMST":
 		fmt.Println("DFA: Received Room State. Parsing...")
 
-		// Deserialize room state based on reconnect status
-		table, err := deserializeRoomState(msg.Payload, ctx.State.Reconnected, ctx.State.PlayerCfg.NickName)
+		table, err := deserializeRoomState(msg.Payload, ctx.State.PlayerCfg.NickName)
 		if err != nil {
 			fmt.Printf("DFA: Failed to parse room state: %v\n", err)
 			ctx.NetMsgOutChan <- unet.NetMsg{Code: "STFL"}
@@ -290,15 +288,22 @@ func (s *StateInGame) Enter(ctx *ProgCtx) {
 			MyNickname:     ctx.State.PlayerCfg.NickName,
 		}
 	}
-	ctx.State.Table.Players[ctx.State.Table.MyNickname] = PlayerData{
-		ChipCount:    ctx.State.PlayerCfg.StartingChips,
-		RoundBet:     0,
-		Cards:        make([]Card, 0),
-		IsMyTurn:     false,
-		IsReady:      false,
-		ActionTaken:  "NONE",
-		ActionAmount: 0,
+
+	// initialize my own state if not set by server
+	// which I think currently is every time
+	_, exists := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+	if !exists {
+		ctx.State.Table.Players[ctx.State.Table.MyNickname] = PlayerData{
+			ChipCount:    ctx.State.PlayerCfg.StartingChips,
+			RoundBet:     0,
+			Cards:        make([]Card, 0),
+			IsMyTurn:     false,
+			IsReady:      false,
+			ActionTaken:  "NONE",
+			ActionAmount: 0,
+		}
 	}
+
 	ctx.StateMutex.Unlock()
 	ctx.UI.SetDirty()
 }
@@ -312,13 +317,30 @@ func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState
 		if !validateGameAction(ctx, evt.Action, evt.Amount) {
 			return nil
 		}
+
+		ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
+
+		if evt.Action == "BETT" {
+			intAmount, _ := unet.ReadVarInt([]byte(evt.Amount))
+			ctx.State.Table.HighBet = int(intAmount)
+			ctx.State.Table.Pot += int(intAmount)
+		}
+
+		if evt.Action == "CALL" {
+			myData, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+			callAmount := min(myData.ChipCount, ctx.State.Table.HighBet)
+			ctx.State.Table.Pot += callAmount
+		}
+
 		if evt.Action == "RDY1" {
 			data, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
 			data.IsReady = true
 			ctx.State.Table.Players[ctx.State.Table.MyNickname] = data
 		}
 
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: evt.Action, Payload: evt.Amount}
+		if evt.Action == "GMLV" {
+			return &StateLobby{}
+		}
 
 	case EvtBackToMain:
 		fmt.Println("DFA: Leaving Game")
@@ -353,8 +375,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 		ctx.State.Table.Players[ctx.State.Table.MyNickname] = myData
 		ctx.State.Table.CommunityCards = make([]Card, 0)
 		ctx.State.Table.Pot = 0
-		ctx.State.Table.RoundBet = 0
-		ctx.State.Table.CurrentBet = 0
+		ctx.State.Table.HighBet = 0
 		ctx.Popup.AddPopup("Game started!", 2*time.Second)
 
 	case "CDTP":
@@ -380,6 +401,17 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 		}
 		ctx.State.Table.Players[ctx.State.Table.MyNickname] = myData
 		ctx.NetMsgOutChan <- unet.NetMsg{Code: "CDOK"}
+
+	case "GMRD":
+		fmt.Println("Handling Game Round")
+		ctx.State.Table.HighBet = 0
+		for name, player := range ctx.State.Table.Players {
+			player.TotalBet += player.RoundBet
+			player.RoundBet = 0
+			player.ActionTaken = "NONE"
+			player.ActionAmount = 0
+			ctx.State.Table.Players[name] = player
+		}
 
 	case "CRVR":
 		val, _ := strconv.Atoi(msg.Payload)
@@ -418,27 +450,53 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetMsg) LogicState {
 	case "SDWN":
 		// Showdown - reveal all cards
 		handleShowdown(ctx, msg.Payload)
-		ctx.NetMsgOutChan <- unet.NetMsg{Code: "SDOK"}
 
 	case "GWIN":
 		// Winner announcement
-		ctx.Popup.AddPopup(fmt.Sprintf("Winner: %s", msg.Payload), 5*time.Second)
+		parseTypes := []unet.ParseTypes{unet.String, unet.VarInt}
+		res, _, err := unet.ParseMessage(msg.Payload, parseTypes)
+		if err != nil {
+			fmt.Println("Server sent malformed win state :(")
+		} else {
+			winner := res[0].(string)
+			winnerAmount := res[1].(int)
+
+			data, _ := ctx.State.Table.Players[winner]
+			data.ChipCount += winnerAmount
+			ctx.State.Table.Players[winner] = data
+
+			ctx.Popup.AddPopup(fmt.Sprintf("Player: %s won %d chips", winner, winnerAmount), 5*time.Second)
+		}
 
 	case "GMDN":
 		// Game end, reset for next round
 		ctx.State.Table.CommunityCards = nil
+		ctx.State.Showdown = false
+
 		myData, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
 		myData.Cards = nil
+		myData.IsMyTurn = false
+		myData.IsReady = false
+		myData.ActionTaken = "NONE"
+		myData.ActionAmount = 0
+
+		ctx.State.Table.RoundPhase = ""
 		ctx.State.Table.Players[ctx.State.Table.MyNickname] = myData
 		ctx.State.Table.Pot = 0
-		ctx.State.Table.RoundBet = 0
-		ctx.State.Table.CurrentBet = 0
+		ctx.State.Table.HighBet = 0
 
 		// Reset player round-specific state
+		pCards := make([]Card, 0)
+		pCards = append(pCards, Card{Hidden: true})
+		pCards = append(pCards, Card{Hidden: true})
 		for name, player := range ctx.State.Table.Players {
+			player.IsReady = false
+			player.IsMyTurn = false
+			player.Cards = pCards
 			player.RoundBet = 0
-			player.ActionTaken = "NONE"
+			player.TotalBet = 0
 			player.ActionAmount = 0
+			player.ActionTaken = "NONE"
 			ctx.State.Table.Players[name] = player
 		}
 
@@ -456,6 +514,10 @@ func validateGameAction(ctx *ProgCtx, action string, amount string) bool {
 
 	if action == "RDY1" || action == "GMLV" {
 		return true
+	}
+
+	if action == "SDOK" {
+		return ctx.State.Showdown
 	}
 
 	myData, exists := table.Players[table.MyNickname]
@@ -478,28 +540,14 @@ func validateGameAction(ctx *ProgCtx, action string, amount string) bool {
 			return false
 		}
 
-		// Check if player has enough chips
 		if betAmt > myData.ChipCount {
 			ctx.Popup.AddPopup(fmt.Sprintf("You only have %d chips", myData.ChipCount), 3*time.Second)
 			return false
 		}
 
-		// Check minimum bet (must be at least current bet)
-		if betAmt < table.CurrentBet {
-			ctx.Popup.AddPopup(fmt.Sprintf("Bet must be at least %d", table.CurrentBet), 3*time.Second)
-			return false
-		}
-
 	case "CALL":
-		// Can only call if there's a bet
-		if table.CurrentBet == 0 {
+		if table.HighBet == 0 {
 			ctx.Popup.AddPopup("There's nothing to call", 2*time.Second)
-			return false
-		}
-
-		// Check if player has enough chips
-		if table.CurrentBet > myData.ChipCount {
-			ctx.Popup.AddPopup(fmt.Sprintf("You need %d chips to call", table.CurrentBet), 3*time.Second)
 			return false
 		}
 
@@ -517,214 +565,222 @@ func validateGameAction(ctx *ProgCtx, action string, amount string) bool {
 
 func handlePlayerJoined(ctx *ProgCtx, payload string) {
 	// Parse PJIN payload: player nickname
-	payloadBytes := []byte(payload)
-	playerName, _ := unet.ReadString(payloadBytes)
-	playerChips, _ := unet.ReadVarInt(payloadBytes[4+len(playerName):])
+	types := []unet.ParseTypes{
+		unet.String,
+		unet.VarInt,
+		unet.SmallInt,
+		unet.SmallInt,
+		unet.SmallInt,
+		unet.SmallInt,
+		unet.VarInt,
+		unet.VarInt,
+		unet.VarInt,
+	}
 
-	// Add new player with default values
-	ctx.State.Table.Players[playerName] = PlayerData{
-		ChipCount:    int(playerChips),
-		RoundBet:     0,
-		Cards:        make([]Card, 0),
-		IsMyTurn:     false,
-		IsFolded:     false,
-		IsReady:      false,
-		ActionTaken:  "NONE",
-		ActionAmount: 0,
+	// we are parsing entire message, thus we ignore consumedBytes
+	parseResults, _, err := unet.ParseMessage(payload, types)
+	if err != nil {
+		fmt.Println("Error occured: ", err.Error())
+		return
+	}
+
+	pNick := parseResults[0].(string)
+	pChips := parseResults[1].(int)
+	pIsFolded := parseResults[2].(int)
+	pIsReady := parseResults[3].(int)
+	pIsMyTurn := parseResults[4].(int)
+	pActionTaken := parseResults[5].(int)
+	pActionAmount := parseResults[6].(int)
+	pRoundBet := parseResults[7].(int)
+	pTotalBet := parseResults[8].(int)
+
+	pCards := make([]Card, 0)
+	pCards = append(pCards, Card{Hidden: true})
+	pCards = append(pCards, Card{Hidden: true})
+
+	ctx.State.Table.Players[pNick] = PlayerData{
+		ChipCount:    pChips,
+		RoundBet:     pRoundBet,
+		TotalBet:     pTotalBet,
+		Cards:        pCards,
+		IsMyTurn:     pIsMyTurn == 1,
+		IsFolded:     pIsFolded == 1,
+		IsReady:      pIsReady == 1,
+		ActionTaken:  actionIntToString(pActionTaken),
+		ActionAmount: pActionAmount,
 	}
 }
 
 func handlePlayerAction(ctx *ProgCtx, payload string) {
-	// Parse PACT payload format: "nickname:ACTION:amount"
-	parts := strings.Split(payload, ":")
-	if len(parts) < 3 {
+	parseTypes := []unet.ParseTypes{
+		unet.String,
+		unet.SmallInt,
+		unet.VarInt,
+	}
+	res, _, err := unet.ParseMessage(payload, parseTypes)
+	if err != nil {
+		// here a state desync will happen, maybe it would be better to disconnect at this point for resync
 		return
 	}
 
-	payloadBytes := []byte(payload)
-	totalBytesRead := 0
-	nickname, _ := unet.ReadString(payloadBytes[totalBytesRead:])
-	action, _ := unet.ReadSmallInt(payloadBytes[len(nickname)+4:])
-	amount, _ := unet.ReadVarInt(payloadBytes[len(nickname)+4+2:])
+	pNick := res[0].(string)
+	pActionTaken := res[1].(int)
+	pActionAmount := res[2].(int)
+	fmt.Println("Parsed Action: ", pNick, pActionTaken, pActionAmount)
 
-	ctx.StateMutex.Lock()
-	defer ctx.StateMutex.Unlock()
-
-	player, exists := ctx.State.Table.Players[nickname]
+	player, exists := ctx.State.Table.Players[pNick]
 	if !exists {
 		return
 	}
 
-	player.ActionTaken = actionIntToString(action)
-	player.ActionAmount = int(amount)
+	player.ActionTaken = actionIntToString(pActionTaken)
+	player.ActionAmount = pActionAmount
 
 	switch player.ActionTaken {
 	case "BETT":
 		player.RoundBet += player.ActionAmount
-		ctx.State.Table.CurrentBet = player.RoundBet
-		ctx.Popup.AddPopup(fmt.Sprintf("%s bet %d", nickname, player.ActionAmount), 2*time.Second)
+		player.ChipCount -= player.ActionAmount
+		ctx.State.Table.HighBet = player.RoundBet
+		ctx.State.Table.Pot += player.RoundBet
+		ctx.Popup.AddPopup(fmt.Sprintf("%s bet %d", pNick, player.ActionAmount), 2*time.Second)
 	case "CALL":
-		player.RoundBet = ctx.State.Table.CurrentBet
-		callAmount := ctx.State.Table.CurrentBet - (player.RoundBet - player.ActionAmount)
-		ctx.Popup.AddPopup(fmt.Sprintf("%s called %d", nickname, callAmount), 2*time.Second)
+		player.RoundBet = pActionAmount
+		ctx.State.Table.Pot += pActionAmount
+		player.ChipCount -= pActionAmount
+		ctx.Popup.AddPopup(fmt.Sprintf("%s called %d", pNick, pActionAmount), 2*time.Second)
 	case "FOLD":
 		player.IsFolded = true
-		ctx.Popup.AddPopup(fmt.Sprintf("%s folded", nickname), 2*time.Second)
+		ctx.Popup.AddPopup(fmt.Sprintf("%s folded", pNick), 2*time.Second)
 	case "CHCK":
-		ctx.Popup.AddPopup(fmt.Sprintf("%s checked", nickname), 2*time.Second)
+		ctx.Popup.AddPopup(fmt.Sprintf("%s checked", pNick), 2*time.Second)
 	}
 
-	ctx.State.Table.Players[nickname] = player
+	ctx.State.Table.Players[pNick] = player
 }
 
 func handleShowdown(ctx *ProgCtx, payload string) {
 	// Parse SDWN payload: series of cards and player info
 	// For simplicity, just show a popup
-	_ = payload
+	pCount, _ := unet.ReadSmallInt([]byte(payload))
+	parseTypes := []unet.ParseTypes{
+		unet.String,
+		unet.SmallInt,
+		unet.SmallInt,
+	}
+
+	nextPayload := string([]byte(payload[2:]))
+	for range pCount {
+		res, consumed, err := unet.ParseMessage(nextPayload, parseTypes)
+		if err != nil {
+			continue
+		}
+
+		nextPayload = string([]byte(nextPayload[consumed:]))
+
+		pNick := res[0].(string)
+		pC1 := res[1].(int)
+		pC2 := res[2].(int)
+
+		pData, exists := ctx.State.Table.Players[pNick]
+		if !exists {
+			continue
+		}
+		pData.Cards[0] = Card{Hidden: false, ID: pC1, Symbol: TranslateCardID(pC1)}
+		pData.Cards[1] = Card{Hidden: false, ID: pC2, Symbol: TranslateCardID(pC2)}
+	}
+
+	ctx.State.Showdown = true
 	ctx.Popup.AddPopup("Showdown! Revealing cards...", 3*time.Second)
 }
 
-func deserializeRoomState(payload string, isReconnect bool, myNickname string) (PokerTable, error) {
-	bytes := []byte(payload)
-	offset := 0
+func deserializeRoomState(payload string, myNickname string) (PokerTable, error) {
 	table := PokerTable{
 		CommunityCards: make([]Card, 0),
 		Players:        make(map[string]PlayerData),
 		MyNickname:     myNickname,
 	}
 
-	readVarInt := func() (int, error) {
-		val, ok := unet.ReadVarInt(bytes[offset:])
-		if !ok {
-			return 0, fmt.Errorf("failed to read var int")
-		}
-		digits := countDigits(int(val))
-		fmt.Println("Adding:", 2+digits)
-		offset += 2 + digits
-		return int(val), nil
+	readTypes := []unet.ParseTypes{
+		unet.VarInt,
+		unet.VarInt,
+		unet.SmallInt,
 	}
-
-	pot, err := readVarInt()
+	res, consumed, err := unet.ParseMessage(payload, readTypes)
 	if err != nil {
-		return table, errors.Join(err, fmt.Errorf("Pot Error"))
+		return table, errors.Join(err, fmt.Errorf("Error occured during 1st phase"))
 	}
-	table.Pot = pot
 
-	currentBet, err := readVarInt()
+	nextPayload := string([]byte(payload[consumed:]))
+
+	table.Pot = res[0].(int)
+	table.HighBet = res[1].(int)
+	commCount := res[2].(int)
+
+	readCardTypes := make([]unet.ParseTypes, commCount+1)
+	for i := range readCardTypes {
+		readCardTypes[i] = unet.SmallInt
+	}
+
+	res, consumed, err = unet.ParseMessage(nextPayload, readCardTypes)
 	if err != nil {
-		return table, errors.Join(err, fmt.Errorf("Current Bet Error"))
+		return table, errors.Join(err, fmt.Errorf("Error occured during reading CommunityCards and PlayerCount"))
 	}
-	table.CurrentBet = currentBet
 
-	commCount, ok := unet.ReadSmallInt(bytes[offset:])
-	if !ok {
-		return table, fmt.Errorf("failed to read community card count")
-	}
-	offset += 2
+	nextPayload = string([]byte(nextPayload[consumed:]))
 
-	for range commCount {
-		cardID, ok := unet.ReadSmallInt(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read community card")
-		}
+	for index := range commCount {
+		cardID := res[index].(int)
 		table.CommunityCards = append(table.CommunityCards, Card{
 			ID:     cardID,
 			Symbol: TranslateCardID(cardID),
 		})
-		offset += 2
 	}
 
-	if isReconnect {
-		myChips, err := readVarInt()
-		if err != nil {
-			return table, errors.Join(err, fmt.Errorf("My Chips Error"))
-		}
+	playerCount := res[commCount].(int)
 
-		isFolded, ok := unet.ReadSmallInt(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read is folded")
-		}
-		offset += 2
-
-		isReady, ok := unet.ReadSmallInt(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read is ready")
-		}
-		offset += 2
-
-		actionTaken, ok := unet.ReadSmallInt(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read action taken")
-		}
-		offset += 2
-
-		actionAmount, err := readVarInt()
-		if err != nil {
-			return table, errors.Join(err, fmt.Errorf("My Action Amount Error"))
-		}
-
-		table.Players[myNickname] = PlayerData{
-			ChipCount:    myChips,
-			IsFolded:     isFolded == 1,
-			IsReady:      isReady == 1,
-			ActionTaken:  actionIntToString(actionTaken),
-			ActionAmount: actionAmount,
-			Cards:        make([]Card, 0),
-		}
+	readPlayerTypes := []unet.ParseTypes{
+		unet.String,
+		unet.VarInt,
+		unet.SmallInt,
+		unet.SmallInt,
+		unet.SmallInt,
+		unet.SmallInt,
+		unet.VarInt,
+		unet.VarInt,
+		unet.VarInt,
 	}
-
-	playerCount, ok := unet.ReadSmallInt(bytes[offset:])
-	if !ok {
-		return table, fmt.Errorf("failed to read player count")
-	}
-	offset += 2
-
 	for range playerCount {
-		nickname, ok := unet.ReadString(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read player nickname")
-		}
-		offset += 4 + len(nickname)
-
-		chips, err := readVarInt()
+		res, consumed, err := unet.ParseMessage(nextPayload, readPlayerTypes)
 		if err != nil {
-			return table, errors.Join(err, fmt.Errorf("Chips Error"))
+			return table, errors.Join(err, fmt.Errorf("Error occured during reading player"))
 		}
 
-		isFolded, ok := unet.ReadSmallInt(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read player is folded")
-		}
-		offset += 2
+		nextPayload = string([]byte(nextPayload[consumed:]))
 
-		isReady, ok := unet.ReadSmallInt(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read player is ready")
-		}
-		offset += 2
+		pNick := res[0].(string)
+		pChips := res[1].(int)
+		pIsFolded := res[2].(int)
+		pIsReady := res[3].(int)
+		pIsMyTurn := res[4].(int)
+		pActionTaken := res[5].(int)
+		pActionAmount := res[6].(int)
+		pRoundBet := res[7].(int)
+		pTotalBet := res[8].(int)
 
-		actionTaken, ok := unet.ReadSmallInt(bytes[offset:])
-		if !ok {
-			return table, fmt.Errorf("failed to read player action taken")
-		}
-		offset += 2
+		pCards := make([]Card, 0)
+		pCards = append(pCards, Card{Hidden: true})
+		pCards = append(pCards, Card{Hidden: true})
 
-		actionAmount, err := readVarInt()
-		if err != nil {
-			return table, errors.Join(err, fmt.Errorf("Action Amount Error"))
-		}
-
-		if _, exists := table.Players[nickname]; exists {
-			continue
-		}
-
-		table.Players[nickname] = PlayerData{
-			ChipCount:    chips,
-			IsFolded:     isFolded == 1,
-			IsReady:      isReady == 1,
-			ActionTaken:  actionIntToString(actionTaken),
-			ActionAmount: actionAmount,
-			Cards:        make([]Card, 0),
+		table.Players[pNick] = PlayerData{
+			RoundBet:     pRoundBet,
+			TotalBet:     pTotalBet,
+			ChipCount:    pChips,
+			IsFolded:     pIsFolded == 1,
+			IsReady:      pIsReady == 1,
+			IsMyTurn:     pIsMyTurn == 1,
+			ActionTaken:  actionIntToString(pActionTaken),
+			ActionAmount: pActionAmount,
+			Cards:        pCards,
 		}
 	}
 
