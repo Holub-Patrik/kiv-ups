@@ -1,0 +1,15 @@
+- Add if room is in showdown to room_state
+
+- If the room is in showdown, the player must be sent every other players card
+
+- Make ping work -> (Just add a check in main logic loops of MainThread and RoomThread)
+    - If player doesn't respond with a ping -> disconnect
+- Add disconnects to clients, if server sends garbagge data
+
+- Look at ordering, it seems to be kind of out of whack
+
+- Sometime bett checking is fucked (found in no arg run)
+
+- I need to add short time internet issues
+    - That should be solvable. 
+    - HOW THE FUCK DO I SOLVE NAME RESOLUTION WITHIN TIME LIMITS ????
