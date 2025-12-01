@@ -4,3 +4,4 @@ Make ping work -> (Just add a check in main logic loops of MainThread and RoomTh
 If player doesn't respond with a ping -> disconnect
 Add disconnects to clients, if server sends garbagge data
 Look at ordering, it seems to be kind of out of whack
+Sometime bett checking is fucked (found in no arg run)
