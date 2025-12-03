@@ -105,46 +105,9 @@ public:
         results = parser.parse_bytes(std::string_view{start, end});
 
         if (results.error_occured) {
-          invalid_msg_count++;
-          std::cerr << "Protocol Error " << invalid_msg_count << "/"
-                    << MAX_CONSECUTIVE_ERRORS << " on FD: " << sock.get_fd()
-                    << "\n";
-
-          if (invalid_msg_count >= MAX_CONSECUTIVE_ERRORS) {
-            std::cerr << "Too many errors, disconnecting FD: " << sock.get_fd()
-                      << "\n";
-            disconnected = true;
-            return;
-          }
-
-          // Try to resync
-          parser.reset_parser();
-          total_parsed_bytes++;
-
-          usize scanned = 0;
-          bool found_sync = false;
-
-          while (total_parsed_bytes < static_cast<usize>(bytes_read) &&
-                 scanned < MAX_FAST_FORWARD_BYTES) {
-            auto state = parser.parse_byte(byte_buf[total_parsed_bytes]);
-            parser.reset_parser();
-
-            if (state != Net::Serde::ParserState::Invalid) {
-              found_sync = true;
-              break;
-            }
-            total_parsed_bytes++;
-            scanned++;
-          }
-
-          if (found_sync) {
-            std::cout << "Resync successful at offset " << total_parsed_bytes
-                      << "\n";
-          } else {
-            std::cout << "Resync failed (limit or buffer end reached).\n";
-          }
-
-          continue;
+          std::cerr << "Error occured on FD: " << sock.get_fd() << "\n";
+          disconnected = true;
+          return;
         }
 
         if (results.parser_done) {
