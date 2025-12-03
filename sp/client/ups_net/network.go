@@ -126,7 +126,6 @@ func (nh *NetHandler) handleConnect(host, port string) {
 	nh.setState(StateConnecting)
 	nh.eventChan <- NetConnecting{}
 
-	// Store for potential reconnection
 	nh.reconnectData.Lock()
 	nh.reconnectData.host = host
 	nh.reconnectData.port = port
@@ -230,13 +229,16 @@ func (nh *NetHandler) connectWithRetry(host, port string, isReconnect bool) {
 			return
 		}
 
-		// Wait before retry
 		select {
 		case <-time.After(reconnectInt):
 			continue
-		case <-nh.commandChan:
-			// Check if we got a disconnect command
-			return
+		case cmd := <-nh.commandChan:
+			switch cmd.(type) {
+			case NetDisconnect:
+				nh.setState(StateDisconnected)
+				nh.eventChan <- NetDisconnected{}
+				return
+			}
 		}
 	}
 }
@@ -254,13 +256,11 @@ func (nh *NetHandler) readerLoop(conn net.Conn) {
 			return
 		}
 
-		// Set read timeout to detect dead connections
 		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		bytesRead, err := conn.Read(buffer[:])
 
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// Read timeout, check if connection is still alive
 				continue
 			}
 
@@ -318,7 +318,6 @@ func (nh *NetHandler) handleConnectionLost() {
 	nh.disconnectInternal()
 	nh.setState(StateReconnecting)
 
-	// Check if we should attempt reconnection
 	nh.reconnectData.Lock()
 	if nh.reconnectData.host != "" && nh.reconnectData.port != "" {
 		nh.reconnectData.active = true
@@ -332,7 +331,6 @@ func (nh *NetHandler) handleConnectionLost() {
 	}
 	nh.reconnectData.Unlock()
 
-	// No reconnection data, just disconnect
 	nh.setState(StateDisconnected)
 	nh.eventChan <- NetDisconnected{}
 }

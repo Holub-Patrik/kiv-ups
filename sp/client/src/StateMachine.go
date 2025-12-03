@@ -139,6 +139,10 @@ func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicSt
 		}
 
 		ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "CONN", Payload: nickPayload})
+
+	case unet.NetDisconnected:
+		ctx.Popup.AddPopup("Connection couldn't be established", time.Second*2)
+		return &StateMainMenu{}
 	}
 
 	return nil
