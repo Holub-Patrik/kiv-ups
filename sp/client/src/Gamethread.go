@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"time"
+
+	unet "poker-client/ups_net"
 )
 
 func gameThread(ctx *ProgCtx) {
@@ -24,24 +26,8 @@ func gameThread(ctx *ProgCtx) {
 			}
 			nextState = currentState.HandleInput(ctx, input)
 
-		case msg, ok := <-ctx.NetMsgInChan:
-			if !ok {
-				// Network closed
-				// this causes infinite loop
-				fmt.Println("GameThread: NetMsgInChan closed.")
-				ctx.NetMsgInChan = nil
-				ctx.NetMsgInChan = nil
-
-				if !ctx.ShouldClose {
-					ctx.Popup.AddPopup("Connection Lost", time.Second*3)
-					nextState = &StateMainMenu{} // Fallback to safe state
-				}
-			} else {
-				// Global handlers (like PING) could go here
-
-				// State specific handlers
-				nextState = currentState.HandleNetwork(ctx, msg)
-			}
+		case netEvt := <-ctx.EventChan:
+			nextState = currentState.HandleNetwork(ctx, netEvt)
 
 		default:
 			time.Sleep(time.Millisecond * 10)
@@ -58,9 +44,7 @@ func gameThread(ctx *ProgCtx) {
 		}
 	}
 
-	fmt.Println("GameThread shutting down.")
-	if ctx.NetHandler.MsgOut() != nil {
-		ctx.NetHandler.Disconnect()
-	}
+	fmt.Println("meThread shutting down.")
+	ctx.NetHandler.SendCommand(unet.NetShutdown{})
 	ctx.DoneChan <- true
 }

@@ -402,3 +402,32 @@ func ParseMessage(payload string, types []ParseTypes) ([]any, int, error) {
 
 	return res, offset, nil
 }
+
+type NetMsg struct {
+	Code    string
+	Payload string
+}
+
+// creates the string that can be transmitted with network.Write()
+func (msg *NetMsg) ToString() string {
+	builder := strings.Builder{}
+	builder.WriteString(magicStr)
+
+	payload_len := len(msg.Payload)
+	if payload_len > 0 {
+		builder.WriteByte('P')
+	} else {
+		builder.WriteByte('N')
+	}
+
+	builder.Write([]byte(msg.Code))
+	if payload_len > 0 {
+		len_str := fmt.Sprintf("%04d", payload_len)
+
+		builder.Write([]byte(len_str))
+		builder.Write([]byte(msg.Payload))
+	}
+
+	builder.WriteByte('\n')
+	return builder.String()
+}

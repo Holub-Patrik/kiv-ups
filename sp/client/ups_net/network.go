@@ -3,254 +3,402 @@ package ups_net
 import (
 	"fmt"
 	"net"
-	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-const chanBufSize = 100
-const arrBufSize = 256
-const magicStr = "PKR"
-
 const (
-	PAYLOAD_INDENTIFIER   byte = 'P'
-	NOPAYLOAD_INDENTIFIER byte = 'N'
+	chanBufSize  = 100
+	arrBufSize   = 256
+	magicStr     = "PKR"
+	reconnectMax = 30 // 30 seconds total
+	reconnectInt = 1 * time.Second
 )
 
-type NetMsg struct {
-	Code    string
-	Payload string
+// Network events sent to game thread
+type NetEvent any
+type NetConnecting struct{}
+type NetConnected struct{}
+type NetReconnecting struct {
+	Attempt int
+	Max     int
+}
+type NetReconnected struct{}
+type NetDisconnected struct{}
+type NetMessage struct {
+	Msg NetMsg
 }
 
-// opening/closing socket
-// This has to be included within the Game Thread so it can ask for messages from the network thread
+// Commands from game thread
+type NetCommand any
+type NetConnect struct {
+	Host string
+	Port string
+}
+type NetDisconnect struct{}
+type NetShutdown struct{}
+
+// Network handler with reconnection support
 type NetHandler struct {
-	conn    net.Conn
-	msgIn   chan NetMsg
-	msgOut  chan NetMsg
-	closing atomic.Bool
-
-	wg sync.WaitGroup
-}
-
-// receiving messages from client
-type MsgAcceptor struct {
+	// Connection state
 	conn     net.Conn
-	msg_chan chan NetMsg
-	nh       *NetHandler
+	connMtx  sync.RWMutex
+	state    atomic.Value // stores ConnectionState
+	shutdown atomic.Bool
+
+	// Channels
+	eventChan   chan NetEvent   // Network -> Game (events)
+	commandChan chan NetCommand // Game -> Network (commands)
+	msgOutChan  chan NetMsg     // Game -> Network (outgoing messages)
+
+	// Reconnection state
+	reconnectData struct {
+		sync.Mutex
+		host     string
+		port     string
+		attempts int
+		active   bool
+		timer    *time.Timer
+	}
 }
 
-// Attempts to connect to the given IP
-// If it for any reason fails, it returns false
-// If it connects, it sets the networkHandler connection to the retrieved connection
-func (nh *NetHandler) Connect(host string, port string) bool {
+type ConnectionState int
+
+const (
+	StateDisconnected ConnectionState = iota
+	StateConnecting
+	StateConnected
+	StateReconnecting
+)
+
+func (nh *NetHandler) Init() {
+	nh.eventChan = make(chan NetEvent, chanBufSize)
+	nh.commandChan = make(chan NetCommand, chanBufSize)
+	nh.msgOutChan = make(chan NetMsg, chanBufSize)
+	nh.state.Store(StateDisconnected)
+	nh.shutdown.Store(false)
+}
+
+// Run is the main network thread
+func (nh *NetHandler) Run() {
+	fmt.Println("Network thread starting")
+
+	for !nh.shutdown.Load() {
+		select {
+		case cmd := <-nh.commandChan:
+			nh.handleCommand(cmd)
+
+		case msg := <-nh.msgOutChan:
+			nh.sendMessage(msg)
+
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	fmt.Println("Network thread shutting down")
+	nh.cleanup()
+}
+
+func (nh *NetHandler) handleCommand(cmd NetCommand) {
+	switch c := cmd.(type) {
+	case NetConnect:
+		nh.handleConnect(c.Host, c.Port)
+
+	case NetDisconnect:
+		nh.handleDisconnect()
+
+	case NetShutdown:
+		nh.shutdown.Store(true)
+
+	default:
+		fmt.Printf("Unknown command: %T\n", c)
+	}
+}
+
+func (nh *NetHandler) handleConnect(host, port string) {
+	if nh.getState() != StateDisconnected {
+		fmt.Println("Already connected or connecting")
+		return
+	}
+
+	nh.setState(StateConnecting)
+	nh.eventChan <- NetConnecting{}
+
+	// Store for potential reconnection
+	nh.reconnectData.Lock()
+	nh.reconnectData.host = host
+	nh.reconnectData.port = port
+	nh.reconnectData.attempts = 0
+	nh.reconnectData.active = false
+	nh.reconnectData.Unlock()
+
+	nh.connectWithRetry(host, port, false)
+}
+
+func (nh *NetHandler) handleDisconnect() {
+	nh.reconnectData.Lock()
+	nh.reconnectData.active = false
+	if nh.reconnectData.timer != nil {
+		nh.reconnectData.timer.Stop()
+	}
+	nh.reconnectData.Unlock()
+
+	nh.disconnectInternal()
+	nh.setState(StateDisconnected)
+	nh.eventChan <- NetDisconnected{}
+}
+
+func (nh *NetHandler) disconnectInternal() {
+	nh.connMtx.Lock()
+	defer nh.connMtx.Unlock()
+
 	if nh.conn != nil {
-		return false
+		nh.conn.Close()
+		nh.conn = nil
 	}
-
-	fmt.Println("NetHandler: Attempting connect")
-	maybe_conn, err := net.Dial("tcp", host+":"+port)
-
-	if err != nil {
-		fmt.Println("NetHandler: Connect Failed ->", err)
-		return false
-	}
-
-	fmt.Println("NetHandler: Success")
-	nh.conn = maybe_conn
-	nh.msgIn = make(chan NetMsg, chanBufSize)
-	nh.msgOut = make(chan NetMsg, chanBufSize)
-
-	go nh.sendMessages()
-	acceptor := MsgAcceptor{
-		conn:     nh.conn,
-		msg_chan: nh.msgIn,
-		nh:       nh,
-	}
-	go acceptor.AcceptMessages()
-	nh.wg.Add(2)
-
-	return true
 }
 
-func (nh *NetHandler) Disconnect() {
-	fmt.Println("NetHandler: Disconnecting...")
+func (nh *NetHandler) connectWithRetry(host, port string, isReconnect bool) {
+	if isReconnect {
+		nh.setState(StateReconnecting)
+	}
 
-	// an atomic closing check to prevent race conditions
-	// namely there were issues with the nil checks where multiple
-	// threads managed to get into the if and close connections/channels
-	closing := nh.closing.Load()
-	swapped := nh.closing.CompareAndSwap(closing, true)
-
-	if !swapped {
-		// a true has been set from another thread
-		// so a closing operation is already in process
-		nh.wg.Wait()
-	} else {
-		// this should stop sender
-		if nh.msgOut != nil {
-			close(nh.msgOut)
-			nh.msgOut = nil
+	for {
+		if nh.shutdown.Load() {
+			return
 		}
 
-		// this should stop receiver
-		if nh.conn != nil {
-			nh.conn.Close()
-			nh.conn = nil
+		currentState := nh.getState()
+		if currentState == StateDisconnected && !isReconnect {
+			return
 		}
 
-		// if both threads are already dead, this should be noop
-		nh.wg.Wait()
+		if isReconnect {
+			nh.reconnectData.Lock()
+			if !nh.reconnectData.active {
+				nh.reconnectData.Unlock()
+				return
+			}
+			attempt := nh.reconnectData.attempts + 1
+			nh.reconnectData.attempts = attempt
+			nh.reconnectData.Unlock()
 
-		if nh.msgIn != nil {
-			close(nh.msgIn)
-			nh.msgIn = nil
+			if attempt > reconnectMax {
+				fmt.Println("Reconnection attempts exhausted")
+				nh.disconnectInternal()
+				nh.setState(StateDisconnected)
+				nh.eventChan <- NetDisconnected{}
+				return
+			}
+
+			nh.eventChan <- NetReconnecting{
+				Attempt: attempt,
+				Max:     reconnectMax,
+			}
 		}
-	}
 
-	fmt.Println("NetHandler: Disconnected")
-}
+		conn, err := net.Dial("tcp", host+":"+port)
+		if err == nil {
+			nh.setConnection(conn)
+			nh.setState(StateConnected)
 
-func (nh *NetHandler) MsgIn() chan NetMsg {
-	return nh.msgIn
-}
+			if isReconnect {
+				nh.eventChan <- NetReconnected{}
+				nh.reconnectData.Lock()
+				nh.reconnectData.active = false
+				nh.reconnectData.attempts = 0
+				if nh.reconnectData.timer != nil {
+					nh.reconnectData.timer.Stop()
+				}
+				nh.reconnectData.Unlock()
+			} else {
+				nh.eventChan <- NetConnected{}
+			}
 
-func (nh *NetHandler) MsgOut() chan NetMsg {
-	return nh.msgOut
-}
+			go nh.readerLoop(conn)
+			return
+		}
 
-func (nh *NetHandler) sendMessages() {
-	fmt.Println("Sender Thread Starting ... ")
+		fmt.Printf("Connection failed: %v\n", err)
 
-	msg_builder := strings.Builder{}
-	for msg := range nh.msgOut {
-		fmt.Println("NetHandler: Sending ->", msg.Code, msg.Payload)
-		byte_msg := []byte(msg.ToStringWithBuilder(&msg_builder))
-		_, err := nh.conn.Write(byte_msg)
+		if !isReconnect {
+			nh.disconnectInternal()
+			nh.setState(StateDisconnected)
+			nh.eventChan <- NetDisconnected{}
+			return
+		}
 
-		if err != nil {
-			// write error, means socket was closed
-			fmt.Println("Sender Thread: Write error:", err)
-			nh.wg.Done()
-			nh.Disconnect()
+		// Wait before retry
+		select {
+		case <-time.After(reconnectInt):
+			continue
+		case <-nh.commandChan:
+			// Check if we got a disconnect command
 			return
 		}
 	}
-
-	fmt.Println("Sender Thread Ending")
-	nh.wg.Done()
 }
 
-// creates the string that can be transmitted with network.Write()
-func (msg *NetMsg) ToString() string {
-	builder := strings.Builder{}
-	builder.WriteString(magicStr)
+func (nh *NetHandler) readerLoop(conn net.Conn) {
+	fmt.Println("Reader thread starting")
+	defer fmt.Println("Reader thread exiting")
 
-	payload_len := len(msg.Payload)
-	if payload_len > 0 {
-		builder.WriteByte('P')
-	} else {
-		builder.WriteByte('N')
-	}
-
-	builder.Write([]byte(msg.Code))
-	if payload_len > 0 {
-		len_str := fmt.Sprintf("%04d", payload_len)
-
-		builder.Write([]byte(len_str))
-		builder.Write([]byte(msg.Payload))
-	}
-
-	builder.WriteByte('\n')
-	return builder.String()
-}
-
-// creates the string that can be transmitted with network.Write()
-func (msg *NetMsg) ToStringWithBuilder(builder *strings.Builder) string {
-	builder.WriteString(magicStr)
-
-	payload_len := len(msg.Payload)
-	if payload_len > 0 {
-		builder.WriteByte(PAYLOAD_INDENTIFIER)
-	} else {
-		builder.WriteByte(NOPAYLOAD_INDENTIFIER)
-	}
-
-	builder.WriteString(msg.Code)
-	if payload_len > 0 {
-		len_str := fmt.Sprintf("%04d", payload_len)
-
-		builder.WriteString(len_str)
-		builder.WriteString(msg.Payload)
-	}
-
-	builder.WriteByte('\n')
-	ret_str := builder.String()
-	builder.Reset()
-
-	return ret_str
-}
-
-func (self *MsgAcceptor) AcceptMessages() {
-	fmt.Println("Accepter Thread Starting")
 	buffer := [arrBufSize]byte{}
-
 	parser := Parser{}
 	parser.Init()
 
 	for {
-		// waits for 20 milliseconds if anything is received
-		deadline := time.Now().Add(time.Millisecond * 20)
-		self.conn.SetReadDeadline(deadline)
-		bytes_read, err := self.conn.Read(buffer[:])
-
-		if err != nil {
-			if os.IsTimeout(err) {
-				continue
-			}
-
-			fmt.Println("Accepter Thread: Read error:", err)
-			self.nh.wg.Done()
-			self.nh.Disconnect()
+		if nh.shutdown.Load() {
 			return
 		}
 
-		fmt.Println("Received: <- " + string(buffer[:bytes_read]))
-		var total_parsed_bytes uint64 = 0
-		results := ParseResults{}
+		// Set read timeout to detect dead connections
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		bytesRead, err := conn.Read(buffer[:])
 
-		for total_parsed_bytes < uint64(bytes_read) {
-			results = parser.ParseBytes(buffer[total_parsed_bytes:bytes_read])
-
-			if results.Error {
-				fmt.Println("Accepter Thread: Server sent goobledegook")
-				// even though the thread is still running, it will quickly close
-				self.nh.wg.Done()
-				self.nh.Disconnect()
-				return
-			}
-
-			if results.parser_done {
-				code_msg := ""
-				if results.payload != "" {
-					code_msg = "Payload: " + results.payload
-				}
-				fmt.Println("Parsed correct message <- Code:", results.code, code_msg)
-
-				if results.code == "PING" {
-					self.nh.msgOut <- NetMsg{Code: "PING"}
-				} else {
-					self.msg_chan <- NetMsg{Code: results.code, Payload: results.payload}
-				}
-
-				total_parsed_bytes += results.BytesParsed
-				parser.ResetParser()
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Read timeout, check if connection is still alive
 				continue
 			}
 
-			total_parsed_bytes += results.BytesParsed
+			fmt.Printf("Reader error: %v\n", err)
+			nh.handleConnectionLost()
+			return
 		}
+
+		fmt.Printf("Received %d bytes\n", bytesRead)
+		nh.processBuffer(buffer[:bytesRead], &parser)
+	}
+}
+
+func (nh *NetHandler) processBuffer(buffer []byte, parser *Parser) {
+	var totalParsed uint64 = 0
+
+	for totalParsed < uint64(len(buffer)) {
+		results := parser.ParseBytes(buffer[totalParsed:])
+
+		if results.Error {
+			fmt.Println("Protocol error, disconnecting")
+			nh.handleConnectionLost()
+			return
+		}
+
+		if results.parser_done {
+			fmt.Printf("Parsed message: %s\n", results.code)
+
+			if results.code == "PING" {
+				nh.sendMessage(NetMsg{Code: "PING"})
+			} else {
+				nh.eventChan <- NetMessage{
+					Msg: NetMsg{
+						Code:    results.code,
+						Payload: results.payload,
+					},
+				}
+			}
+
+			totalParsed += results.BytesParsed
+			parser.ResetParser()
+			continue
+		}
+
+		totalParsed += results.BytesParsed
+	}
+}
+
+func (nh *NetHandler) handleConnectionLost() {
+	currentState := nh.getState()
+	if currentState != StateConnected {
+		return
+	}
+
+	nh.disconnectInternal()
+	nh.setState(StateReconnecting)
+
+	// Check if we should attempt reconnection
+	nh.reconnectData.Lock()
+	if nh.reconnectData.host != "" && nh.reconnectData.port != "" {
+		nh.reconnectData.active = true
+		nh.reconnectData.attempts = 0
+		host := nh.reconnectData.host
+		port := nh.reconnectData.port
+		nh.reconnectData.Unlock()
+
+		go nh.connectWithRetry(host, port, true)
+		return
+	}
+	nh.reconnectData.Unlock()
+
+	// No reconnection data, just disconnect
+	nh.setState(StateDisconnected)
+	nh.eventChan <- NetDisconnected{}
+}
+
+func (nh *NetHandler) sendMessage(msg NetMsg) {
+	if nh.getState() != StateConnected {
+		fmt.Println("Cannot send, not connected")
+		return
+	}
+
+	nh.connMtx.RLock()
+	conn := nh.conn
+	nh.connMtx.RUnlock()
+
+	if conn == nil {
+		return
+	}
+
+	data := msg.ToString()
+	_, err := conn.Write([]byte(data))
+
+	if err != nil {
+		fmt.Printf("Send error: %v\n", err)
+		nh.handleConnectionLost()
+	}
+}
+
+// Helper methods
+func (nh *NetHandler) getState() ConnectionState {
+	return nh.state.Load().(ConnectionState)
+}
+
+func (nh *NetHandler) setState(state ConnectionState) {
+	nh.state.Store(state)
+}
+
+func (nh *NetHandler) setConnection(conn net.Conn) {
+	nh.connMtx.Lock()
+	nh.conn = conn
+	nh.connMtx.Unlock()
+}
+
+func (nh *NetHandler) cleanup() {
+	nh.disconnectInternal()
+	close(nh.eventChan)
+	close(nh.commandChan)
+	close(nh.msgOutChan)
+}
+
+// Public API for game thread
+func (nh *NetHandler) EventChan() <-chan NetEvent {
+	return nh.eventChan
+}
+
+func (nh *NetHandler) SendCommand(cmd NetCommand) {
+	select {
+	case nh.commandChan <- cmd:
+	default:
+		fmt.Println("Command channel full")
+	}
+}
+
+func (nh *NetHandler) SendNetMsg(msg NetMsg) {
+	select {
+	case nh.msgOutChan <- msg:
+	default:
+		fmt.Println("Message channel full")
 	}
 }

@@ -77,6 +77,7 @@ type UserInputEvent any
 
 type EvtAcceptReconnect struct{}
 type EvtDeclineReconnect struct{}
+type EvtRefreshRooms struct{}
 type EvtCancelConnect struct{}
 type EvtQuit struct{}
 type EvtBackToMain struct{}
@@ -121,11 +122,10 @@ type ProgCtx struct {
 	StateMutex sync.RWMutex
 
 	UserInputChan chan UserInputEvent // Render -> Game
-	NetMsgInChan  chan unet.NetMsg    // Network -> Game
-	NetMsgOutChan chan unet.NetMsg    // Game -> Network
 	DoneChan      chan bool           // Game -> Main (to signal shutdown)
 
 	NetHandler  unet.NetHandler
+	EventChan   <-chan unet.NetEvent
 	ShouldClose bool
 
 	UI    UIStore

@@ -34,6 +34,11 @@ func initProgCtx(nick string, chips int) *ProgCtx {
 	}
 
 	ctx.NetHandler = unet.NetHandler{}
+	ctx.NetHandler.Init()
+	go ctx.NetHandler.Run()
+
+	ctx.EventChan = ctx.NetHandler.EventChan()
+
 	ctx.Popup = NewPopupManager()
 
 	buildUI(&ctx)
