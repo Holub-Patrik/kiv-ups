@@ -6,6 +6,8 @@
 #include "RoomThread.hpp"
 #include "SockWrapper.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <mutex>
 #include <optional>
@@ -21,11 +23,9 @@ private:
   vec<uq_ptr<Room>> rooms;
   std::atomic<bool> running = false;
   std::thread logic_thread;
+  time_point<hr_clock> last_ping = hr_clock::now();
 
-  // Process a single player's messages - returns room index if player wants to
-  // join
-  auto process_player_messages(PlayerInfo& player) -> opt<usize> {
-    // Process up to MSG_BATCH_SIZE messages per player per tick
+  void process_player_messages(PlayerInfo& player, Result& res) {
     for (usize i = 0; i < MSG_BATCH_SIZE; i++) {
       auto msg_opt = player.msg_client.reader.read();
       if (!msg_opt)
@@ -64,8 +64,9 @@ private:
 
       case PlayerState::AwaitingReconnect:
         if (msg.code == Msg::RCON) {
-          std::cout << "Player accepted recoonnect" << std::endl;
-          return i;
+          std::cout << "Player accepted reconnect" << std::endl;
+          res.reconnect = true;
+          return;
         } else if (msg.code == Msg::PINF) {
           if (!msg.payload) {
             std::cerr << "PINF message without payload, disconnecting\n";
@@ -114,7 +115,12 @@ private:
             player.disconnected = true;
             break;
           }
-          return handle_join(player, msg.payload.value());
+          const auto& mb_room = handle_join(player, msg.payload.value());
+          if (mb_room) {
+            res.connect = true;
+            res.room_idx = mb_room.value();
+          }
+          return;
         } else if (msg.code == Msg::RMRQ) {
           // Client can request room list again
           player.state = PlayerState::SendingRooms;
@@ -139,11 +145,8 @@ private:
         break;
       }
     }
-
-    return null; // No room join requested
   }
 
-  // Validate that a message code is known
   bool is_valid_code(const str_v& code) {
     static const arr<str_v, 40> valid_codes = {
         Msg::CONN, Msg::PNOK, Msg::RCON, Msg::FAIL, Msg::PINF, Msg::PIOK,
@@ -194,8 +197,6 @@ private:
   }
 
   void handle_pinf(PlayerInfo& player, const str& payload) {
-    // For now, we trust the client (no DB validation)
-    // In future: verify player info structure
     const auto& mb_chips = Net::Serde::read_var_int(payload);
     if (!mb_chips) {
       std::cout << "Player sent malformed chips" << std::endl;
@@ -267,45 +268,51 @@ private:
   }
 
   auto process_logic() -> void {
+    Result res{};
     while (running) {
-      vec<pair<usize, usize>> players_to_move{};
+      const auto now = hr_clock::now();
+      const auto diff = dur_cast<seconds>(now - last_ping);
 
-      {
+      if (diff.count() > 10) {
+        for (i64 p_idx = players.size() - 1; p_idx > 0; p_idx--) {
+          if (!players[p_idx]->is_connected()) {
+            continue;
+          }
+
+          if (!players[p_idx]->get_ping()) {
+            players[p_idx]->disconnected = true;
+            // disconnect player
+          }
+
+          players[p_idx]->clear_ping();
+          players[p_idx]->send_ping();
+        }
+      }
+
+      std::erase_if(players, [](const uq_ptr<PlayerInfo>& p) {
+        return !p->is_connected();
+      });
+
+      { // normal message handling
         std::lock_guard g{player_mutex};
 
         // Process each player's messages
-        for (usize i = 0; i < players.size(); i++) {
-          const auto wants_to_join = process_player_messages(*players[i]);
+        // If connect/reconnect happens -> move the player
+        for (i64 p_idx = players.size() - 1; p_idx > 0; p_idx--) {
+          res.reset();
+          process_player_messages(*players[p_idx], res);
 
-          if (wants_to_join) {
-            players_to_move.push_back({i, wants_to_join.value()});
+          if (res.reconnect) {
+            rooms[res.room_idx]->reconnect_player(std::move(players[p_idx]));
           }
-        }
-
-        // Move players to rooms (in reverse order to maintain indices)
-        for (auto it = players_to_move.rbegin(); it != players_to_move.rend();
-             ++it) {
-          const auto& [p_idx, room_idx] = *it;
-          if (p_idx < players.size() && room_idx < rooms.size()) {
-            if (players[p_idx]->reconnect_index > 0) {
-              players[p_idx]->reconnect_index = 0;
-              rooms[room_idx]->reconnect_player(std::move(players[p_idx]));
-            } else {
-              rooms[room_idx]->accept_player(std::move(players[p_idx]));
-            }
-            players.erase(players.begin() + p_idx);
+          if (res.connect) {
+            rooms[res.room_idx]->accept_player(std::move(players[p_idx]));
           }
+          players.erase(players.begin() + p_idx);
         }
-
-        // Remove disconnected players
-        players.erase(std::remove_if(players.begin(), players.end(),
-                                     [](const uq_ptr<PlayerInfo>& p) {
-                                       return !p->is_connected();
-                                     }),
-                      players.end());
       }
 
-      std::this_thread::sleep_for(50ms);
+      std::this_thread::sleep_for(10ms);
     }
   }
 

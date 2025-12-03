@@ -3,6 +3,7 @@
 #include "CircularBufferQueue.hpp"
 #include "MessageSerde.hpp"
 #include "SockWrapper.hpp"
+
 #include <ostream>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -25,7 +26,7 @@ private:
   CB::TwinBuffer<Net::MsgStruct, 128> msg_buf;
   CB::Server<Net::MsgStruct, 128> msg_server;
 
-  bool ping_received = false;
+  bool ping_received = true;
 
   std::thread send_t;
 

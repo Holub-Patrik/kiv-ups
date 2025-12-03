@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -19,18 +20,43 @@ using i16 = std::int16_t;
 using i32 = std::int32_t;
 using i64 = std::int64_t;
 
+using hr_clock = std::chrono::high_resolution_clock;
+using seconds = std::chrono::seconds;
+using millis = std::chrono::milliseconds;
+using micros = std::chrono::microseconds;
+using nanos = std::chrono::nanoseconds;
+
 template <typename T> using opt = std::optional<T>;
 template <typename T> using vec = std::vector<T>;
 template <typename T, usize S> using arr = std::array<T, S>;
 template <typename T1, typename T2> using pair = std::pair<T1, T2>;
+template <typename T> using time_point = std::chrono::time_point<T>;
 
 template <typename T> using uq_ptr = std::unique_ptr<T>;
 
 constexpr std::nullopt_t null = std::nullopt;
 
+using Result = struct res_info {
+  bool connect = false;
+  bool reconnect = false;
+  usize room_idx = 0;
+
+  void reset() {
+    connect = false;
+    reconnect = false;
+    room_idx = 0;
+  }
+};
+
 template <typename T, typename Arg>
 auto scast(Arg&& arg) -> decltype(static_cast<T>(std::forward<Arg>(arg))) {
   return static_cast<T>(std::forward<Arg>(arg));
+}
+
+template <typename T, typename Arg>
+auto dur_cast(Arg&& arg)
+    -> decltype(std::chrono::duration_cast<T>(std::forward<Arg>(arg))) {
+  return std::chrono::duration_cast<T>(std::forward<Arg>(arg));
 }
 
 namespace Msg {
