@@ -26,13 +26,12 @@ private:
   CB::TwinBuffer<Net::MsgStruct, 128> msg_buf;
   CB::Server<Net::MsgStruct, 128> msg_server;
 
-  bool ping_received = true;
-
   std::thread send_t;
 
-public:
+  bool ping_received = true;
   bool disconnected = false;
 
+public:
   int room_send_index = 0;
   int invalid_msg_count = 0;
   int reconnect_index = 0;
@@ -77,7 +76,7 @@ public:
     }
   }
 
-  auto accept_messages() -> void {
+  void accept_messages() {
     std::array<char, 256> byte_buf{0};
 
     while (!disconnected) {
@@ -160,4 +159,5 @@ public:
   }
 
   bool is_connected() const { return !disconnected; }
+  void disconnect() { disconnected = true; }
 };

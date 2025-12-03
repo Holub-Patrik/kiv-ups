@@ -4,6 +4,7 @@
 #include "MessageSerde.hpp"
 #include "PlayerInfo.hpp"
 #include "RoomThread.hpp"
+#include "SockPool.hpp"
 #include "SockWrapper.hpp"
 
 #include <algorithm>
@@ -24,6 +25,7 @@ private:
   std::atomic<bool> running = false;
   std::thread logic_thread;
   time_point<hr_clock> last_ping = hr_clock::now();
+  SockPool player_pool;
 
   void process_player_messages(PlayerInfo& player, Result& res) {
     for (usize i = 0; i < MSG_BATCH_SIZE; i++) {
@@ -41,7 +43,7 @@ private:
         std::cerr << std::format(
             "Unknown message code '{}' from FD {}, disconnecting\n", msg.code,
             player.sock.get_fd());
-        player.disconnected = true;
+        player.disconnect();
         break;
       }
 
@@ -51,14 +53,14 @@ private:
         if (msg.code == Msg::CONN) {
           if (!msg.payload) {
             std::cerr << "CONN message without payload, disconnecting\n";
-            player.disconnected = true;
+            player.disconnect();
             break;
           }
           handle_conn(player, msg.payload.value());
         } else {
           std::cerr << std::format("Unexpected message {} in Connected state\n",
                                    msg.code);
-          player.disconnected = true;
+          player.disconnect();
         }
         break;
 
@@ -70,28 +72,28 @@ private:
         } else if (msg.code == Msg::PINF) {
           if (!msg.payload) {
             std::cerr << "PINF message without payload, disconnecting\n";
-            player.disconnected = true;
+            player.disconnect();
             break;
           }
           handle_pinf(player, msg.payload.value());
         } else {
           std::cerr << std::format(
               "Unexpected message {} in SendingRooms state\n", msg.code);
-          player.disconnected = true;
+          player.disconnect();
         }
 
       case PlayerState::AwaitingRooms:
         if (msg.code == Msg::PINF) {
           if (!msg.payload) {
             std::cerr << "PINF message without payload, disconnecting\n";
-            player.disconnected = true;
+            player.disconnect();
             break;
           }
           handle_pinf(player, msg.payload.value());
         } else {
           std::cerr << std::format(
               "Unexpected message {} in AwaitingRooms state\n", msg.code);
-          player.disconnected = true;
+          player.disconnect();
         }
         break;
 
@@ -100,11 +102,11 @@ private:
           send_next_room(player);
         } else if (msg.code == Msg::RMFL) {
           std::cerr << "Client reported room receive failure, disconnecting\n";
-          player.disconnected = true;
+          player.disconnect();
         } else {
           std::cerr << std::format(
               "Unexpected message {} in SendingRooms state\n", msg.code);
-          player.disconnected = true;
+          player.disconnect();
         }
         break;
 
@@ -112,7 +114,7 @@ private:
         if (msg.code == Msg::JOIN) {
           if (!msg.payload) {
             std::cerr << "JOIN message without payload, disconnecting\n";
-            player.disconnected = true;
+            player.disconnect();
             break;
           }
           const auto& mb_room = handle_join(player, msg.payload.value());
@@ -129,19 +131,19 @@ private:
         } else {
           std::cerr << std::format(
               "Unexpected message {} in AwaitingJoin state\n", msg.code);
-          player.disconnected = true;
+          player.disconnect();
         }
         break;
 
       case PlayerState::InRoom:
         std::cerr << std::format(
             "Player in InRoom state but still in main list, disconnecting\n");
-        player.disconnected = true;
+        player.disconnect();
         break;
       }
 
       // Check if player was marked disconnected during processing
-      if (player.disconnected) {
+      if (!player.is_connected()) {
         break;
       }
     }
@@ -167,7 +169,7 @@ private:
     if (!nick_opt) {
       std::cerr << "Failed to parse nickname from CONN payload\n";
       player.send_message({str{Msg::FAIL}, null});
-      player.disconnected = true;
+      player.disconnect();
       return;
     }
 
@@ -200,7 +202,7 @@ private:
     const auto& mb_chips = Net::Serde::read_var_int(payload);
     if (!mb_chips) {
       std::cout << "Player sent malformed chips" << std::endl;
-      player.disconnected = true;
+      player.disconnect();
       return;
     }
     const auto [chips, _] = mb_chips.value();
@@ -274,13 +276,16 @@ private:
       const auto diff = dur_cast<seconds>(now - last_ping);
 
       if (diff.count() > 10) {
-        for (i64 p_idx = players.size() - 1; p_idx > 0; p_idx--) {
+        last_ping = now;
+        for (i64 p_idx = players.size() - 1; p_idx >= 0; p_idx--) {
           if (!players[p_idx]->is_connected()) {
             continue;
           }
 
           if (!players[p_idx]->get_ping()) {
-            players[p_idx]->disconnected = true;
+            std::cout << std::format("Player {:d} didn't send ping", p_idx)
+                      << std::endl;
+            players[p_idx]->disconnect();
             // disconnect player
           }
 
@@ -289,26 +294,33 @@ private:
         }
       }
 
-      std::erase_if(players, [](const uq_ptr<PlayerInfo>& p) {
-        return !p->is_connected();
-      });
+      { // cleanup
+        std::scoped_lock g{player_mutex};
+        std::erase_if(players, [](const uq_ptr<PlayerInfo>& p) {
+          return !p->is_connected();
+        });
+      }
 
       { // normal message handling
-        std::lock_guard g{player_mutex};
-
         // Process each player's messages
         // If connect/reconnect happens -> move the player
-        for (i64 p_idx = players.size() - 1; p_idx > 0; p_idx--) {
+        for (i64 p_idx = players.size() - 1; p_idx >= 0; p_idx--) {
           res.reset();
           process_player_messages(*players[p_idx], res);
 
-          if (res.reconnect) {
-            rooms[res.room_idx]->reconnect_player(std::move(players[p_idx]));
+          {
+            std::scoped_lock g{player_mutex};
+            if (res.reconnect) {
+              rooms[res.room_idx]->reconnect_player(std::move(players[p_idx]));
+            }
+            if (res.connect) {
+              rooms[res.room_idx]->accept_player(std::move(players[p_idx]));
+            }
+
+            if (res.reconnect || res.connect) {
+              players.erase(players.begin() + p_idx);
+            }
           }
-          if (res.connect) {
-            rooms[res.room_idx]->accept_player(std::move(players[p_idx]));
-          }
-          players.erase(players.begin() + p_idx);
         }
       }
 
@@ -349,8 +361,12 @@ public:
         std::cout << "Waiting for new connection...\n";
         auto new_player = std::make_unique<PlayerInfo>(server_sock);
 
+        /* {
+          player_pool.accept_fd(new_player->sock.get_fd(),
+                                std::move(new_player));
+        } */
         {
-          std::lock_guard<std::mutex> lock(player_mutex);
+          std::scoped_lock lock(player_mutex);
           players.push_back(std::move(new_player));
         }
 

@@ -107,7 +107,8 @@ static str ser_player(const int& seat_idx, const RoomContext& ctx) {
   ss << write_sm_int(seat.is_ready ? 1 : 0);
   ss << write_sm_int(seat_idx == ctx.current_actor ? 1 : 0);
   std::cout << std::format("Senging turn {}: {}", seat.nickname,
-                           seat_idx == ctx.current_actor ? "True" : "False");
+                           seat_idx == ctx.current_actor ? "True" : "False")
+            << std::endl;
   ss << write_sm_int(static_cast<u8>(seat.action_taken));
   ss << write_var_int(seat.action_amount);
   ss << write_var_int(seat.round_bet);
@@ -224,8 +225,6 @@ void Room::room_logic() {
 
 void Room::process_incoming_players() {
   // Here we should send general room information to players
-  // If we are reconnecting players, extended information should be sent, since
-  // he doesn't know his own state
   std::lock_guard g{incoming_mtx};
   if (incoming_queue.empty())
     return;
@@ -297,7 +296,8 @@ void Room::process_network_io() {
   for (int i = 0; i < ctx.seats.size(); ++i) {
     auto& seat = ctx.seats[i];
 
-    if (seat.is_occupied && seat.connection && seat.connection->disconnected) {
+    if (seat.is_occupied && seat.connection &&
+        !seat.connection->is_connected()) {
       std::cout << std::format("Player {} disconnected (seat {})\n",
                                seat.nickname, i);
       seat.connection = nullptr;
@@ -315,7 +315,7 @@ void Room::process_network_io() {
           std::cerr << std::format(
               "Unknown room message {} from {}, disconnecting\n", msg.code,
               seat.nickname);
-          p->disconnected = true;
+          p->disconnect();
           break;
         }
 
@@ -680,8 +680,8 @@ void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
 
   str payload = Net::Serde::write_sm_int(ctx.count_occupied_seats());
 
-  vec<pair<PokerScore, str>> scores;
-  scores.reserve(ctx.count_occupied_seats());
+  PokerScore highest_score{};
+  str winner{};
 
   for (int i = 0; i < ctx.seats.size(); ++i) {
     const auto& seat = ctx.seats[i];
@@ -695,26 +695,18 @@ void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
 
       const auto score =
           scoring.evaluate_poker_hand(std::move(hand), std::move(river));
-      scores.emplace_back(pair{std::move(score), seat.nickname});
+      if (score > highest_score) {
+        highest_score = std::move(score);
+        winner = seat.nickname;
+      }
 
       payload += Net::Serde::write_net_str(seat.nickname);
       payload += std::format("{:02}{:02}", seat.hand[0], seat.hand[1]);
     }
   }
 
-  std::sort(
-      scores.begin(), scores.end(),
-      [](const pair<PokerScore, str>& lhs, const pair<PokerScore, str>& rhs) {
-        const auto& lhs_score = std::get<0>(lhs);
-        const auto& rhs_score = std::get<0>(rhs);
-
-        return lhs_score < rhs_score;
-      });
-
-  const auto& [winner_score, winner_nick] = scores[0];
-
-  const str winner_payload = Net::Serde::write_net_str(winner_nick) +
-                             Net::Serde::write_var_int(ctx.pot);
+  const str winner_payload =
+      Net::Serde::write_net_str(winner) + Net::Serde::write_var_int(ctx.pot);
 
   ctx.broadcast(Msg::SDWN, payload);
   ctx.broadcast(Msg::GWIN, winner_payload);
