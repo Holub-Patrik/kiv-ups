@@ -33,10 +33,3 @@ func countDigits(n int) int {
 	}
 	return digitCount
 }
-
-func getMyChipCount(table *PokerTable) int {
-	if myData, exists := table.Players[table.MyNickname]; exists {
-		return myData.ChipCount
-	}
-	return 0
-}

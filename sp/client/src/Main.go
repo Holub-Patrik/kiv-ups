@@ -1,8 +1,8 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,24 +14,23 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-func initProgCtx(nick string, chips int) *ProgCtx {
+func initProgCtx() *ProgCtx {
 	ctx := ProgCtx{}
+	seededSource := rand.NewSource(time.Now().UnixNano())
+	r := rand.New(seededSource)
 
 	ctx.UserInputChan = make(chan UserInputEvent, 10) // Buffered
 	ctx.DoneChan = make(chan bool)
 
 	ctx.State.Screen = ScreenMainMenu
 	ctx.State.Rooms = make(map[int]Room)
+	ctx.State.Table.Players = make(map[string]PlayerData)
 	ctx.StateMutex = sync.RWMutex{}
 	ctx.State.ServerIP = "127.0.0.1"
 	ctx.State.ServerPort = "8080"
+	ctx.State.Nickname = "Client" + fmt.Sprintf("%d", r.Intn(100))
+	ctx.State.ChipsStr = fmt.Sprintf("%d", rand.Intn(1_000_000_000))
 	ctx.State.BetAmount = ""
-
-	// Initialize Player Config
-	ctx.State.PlayerCfg = PlayerConfig{
-		NickName:      nick,
-		StartingChips: chips,
-	}
 
 	ctx.NetHandler = unet.NetHandler{}
 	ctx.NetHandler.Init()
@@ -49,9 +48,33 @@ func initProgCtx(nick string, chips int) *ProgCtx {
 func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	switch event.SourceID {
 	case "MainMenu_ConnectBtn":
-		ctx.StateMutex.Lock()
-		ctx.State.Screen = ScreenServerSelect
-		ctx.StateMutex.Unlock()
+		if len(ctx.State.Nickname) <= 0 || len(ctx.State.Nickname) > 9999 {
+			ctx.Popup.AddPopup("Please enter a nick within the length limits", time.Second*3)
+			return
+		}
+
+		if len(ctx.State.ChipsStr) <= 0 || len(ctx.State.ChipsStr) > 100 {
+			ctx.Popup.AddPopup("Please enter chip value within the length limits", time.Second*3)
+			return
+		}
+
+		amount, err := strconv.Atoi(strings.TrimSpace(ctx.State.ChipsStr))
+		if err != nil {
+			ctx.Popup.AddPopup("Please enter a numeric chip value", time.Second*3)
+			return
+		}
+
+		_, ok := unet.WriteVarInt(amount)
+		if !ok {
+			ctx.Popup.AddPopup("Invalid value, please enter a different one", time.Second*3)
+			return
+		}
+
+		ctx.State.Table.Players[ctx.State.Nickname] = PlayerData{
+			ChipCount: amount,
+		}
+
+		ctx.UserInputChan <- EvtConnect{Host: ctx.State.ServerIP, Port: ctx.State.ServerPort}
 
 	case "MainMenu_CloseBtn":
 		ctx.UserInputChan <- EvtQuit{}
@@ -81,7 +104,7 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	case "Game_Bet":
 		ctx.StateMutex.RLock()
 		betStr := strings.TrimSpace(ctx.State.BetAmount)
-		myNickname := ctx.State.Table.MyNickname
+		myNickname := ctx.State.Nickname
 		table := ctx.State.Table
 		ctx.StateMutex.RUnlock()
 
@@ -166,11 +189,6 @@ func main() {
 		return
 	}
 
-	// Parse Command Line Arguments
-	nickPtr := flag.String("nick", "Guest", "Player Nickname")
-	chipsPtr := flag.Int("chips", 1000, "Starting Chip Count")
-	flag.Parse()
-
 	rl.SetConfigFlags(rl.FlagWindowResizable)
 
 	const (
@@ -178,12 +196,12 @@ func main() {
 		screenHeight int32 = 1000
 	)
 
-	rl.InitWindow(screenWidth, screenHeight, "Poker Client - "+*nickPtr)
+	rl.InitWindow(screenWidth, screenHeight, "Poker Client")
 	defer rl.CloseWindow()
 
 	rl.SetTargetFPS(60)
 
-	ctx := initProgCtx(*nickPtr, *chipsPtr)
+	ctx := initProgCtx()
 
 	// Start the "Game Thread"
 	go gameThread(ctx)
@@ -220,9 +238,6 @@ func main() {
 		case ScreenMainMenu:
 			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu)
 
-		case ScreenServerSelect:
-			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.ServerSelect)
-
 		case ScreenConnecting, ScreenWaitingForRooms: // Reuse connecting screen for waiting
 			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.Connecting)
 
@@ -234,7 +249,7 @@ func main() {
 			roomSelect.component.Rebuild(ctx.UI.RoomSelect.component)
 			ctx.UI.RoomSelect = roomSelect
 
-			elementsToDraw = append(elementsToDraw, ctx.UI.MainMenu, ctx.UI.RoomSelect)
+			elementsToDraw = append(elementsToDraw, ctx.UI.RoomSelect)
 
 		case ScreenInGame:
 			gameScreen := buildGameScreen(ctx)

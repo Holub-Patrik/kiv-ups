@@ -10,7 +10,6 @@ type UIScreen int
 
 const (
 	ScreenMainMenu UIScreen = iota
-	ScreenServerSelect
 	ScreenConnecting
 	ScreenReconnecting
 	ScreenWaitingForRooms
@@ -46,15 +45,11 @@ type PlayerData struct {
 type PokerTable struct {
 	Players        map[string]PlayerData
 	CommunityCards []Card
-	Pot            int
-	HighBet        int
-	MyNickname     string
-	RoundPhase     string // "PreFlop", "Flop", "Turn", "River"
-}
 
-type PlayerConfig struct {
-	NickName      string
-	StartingChips int
+	Pot     int
+	HighBet int
+
+	RoundPhase string // "PreFlop", "Flop", "Turn", "River"
 }
 
 type GameState struct {
@@ -62,11 +57,12 @@ type GameState struct {
 	Rooms  map[int]Room
 
 	IsConnecting bool
+	Reconnected  bool
 
-	ServerIP    string
-	ServerPort  string
-	PlayerCfg   PlayerConfig
-	Reconnected bool
+	ServerIP   string
+	ServerPort string
+	Nickname   string
+	ChipsStr   string
 
 	Table     PokerTable
 	BetAmount string
@@ -103,7 +99,6 @@ type UIElement struct {
 
 type UIStore struct {
 	MainMenu     UIElement
-	ServerSelect UIElement
 	Connecting   UIElement
 	Reconnecting UIElement
 	RoomSelect   UIElement
@@ -112,7 +107,6 @@ type UIStore struct {
 
 func (store *UIStore) SetDirty() {
 	store.MainMenu.dirty = true
-	store.ServerSelect.dirty = true
 	store.Connecting.dirty = true
 	store.Game.dirty = true
 }

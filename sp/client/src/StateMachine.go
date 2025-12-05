@@ -73,6 +73,12 @@ type StateConnecting struct {
 func (s *StateConnecting) Enter(ctx *ProgCtx) {
 	fmt.Println("DFA: Entered Connecting State")
 	s.reconnecting = false
+	nickPayload, ok := unet.WriteString(ctx.State.Nickname)
+	if !ok {
+		ctx.NetHandler.SendCommand(unet.NetDisconnect{})
+		ctx.Popup.AddPopup("Failed parsing, catastrophe has happened", time.Second*5)
+	}
+	ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "CONN", Payload: nickPayload})
 }
 
 func (s *StateConnecting) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState {
@@ -119,26 +125,10 @@ func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicSt
 		}
 
 	case unet.NetConnected:
-		s.reconnecting = false
-		nickPayload, ok := unet.WriteString(ctx.State.PlayerCfg.NickName)
-		if !ok {
-			ctx.NetHandler.SendCommand(unet.NetDisconnect{})
-			ctx.Popup.AddPopup("Failed parsing, catastrophe has happened", time.Second*5)
-			return &StateMainMenu{}
-		}
-
-		ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "CONN", Payload: nickPayload})
+		return &StateConnecting{false}
 
 	case unet.NetReconnected:
-		s.reconnecting = true
-		nickPayload, ok := unet.WriteString(ctx.State.PlayerCfg.NickName)
-		if !ok {
-			ctx.NetHandler.SendCommand(unet.NetDisconnect{})
-			ctx.Popup.AddPopup("Failed parsing, catastrophe has happened", time.Second*5)
-			return &StateMainMenu{}
-		}
-
-		ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "CONN", Payload: nickPayload})
+		return &StateConnecting{true}
 
 	case unet.NetDisconnected:
 		ctx.Popup.AddPopup("Connection couldn't be established", time.Second*2)
@@ -153,7 +143,9 @@ func (s *StateConnecting) Exit(ctx *ProgCtx) {}
 type StateSendingInfo struct{}
 
 func (s *StateSendingInfo) Enter(ctx *ProgCtx) {
-	chipStr, ok := unet.WriteVarInt(ctx.State.PlayerCfg.StartingChips)
+	data, _ := ctx.State.Table.Players[ctx.State.Nickname]
+	chipStr, ok := unet.WriteVarInt(data.ChipCount)
+
 	if !ok {
 		ctx.NetHandler.SendCommand(unet.NetDisconnect{})
 		ctx.Popup.AddPopup("Failed parsing, catastrophe has happened", time.Second*5)
@@ -180,6 +172,9 @@ func (s *StateSendingInfo) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicS
 			ctx.NetHandler.SendCommand(unet.NetDisconnect{})
 			return &StateMainMenu{}
 		}
+
+	case unet.NetReconnected:
+		return &StateConnecting{false}
 
 	case unet.NetDisconnected:
 		ctx.Popup.AddPopup("Connection lost", time.Second*3)
@@ -223,6 +218,13 @@ func (s *StateRequestingRooms) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) Lo
 			// ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "DNOK"})
 			return &StateLobby{}
 		}
+
+	case unet.NetReconnected:
+		return &StateConnecting{false}
+
+	case unet.NetDisconnected:
+		ctx.Popup.AddPopup("Server stopped responding", time.Second*5)
+		return &StateMainMenu{}
 	}
 
 	return nil
@@ -262,7 +264,14 @@ func (s *StateLobby) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState 
 }
 
 func (s *StateLobby) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState {
-	// TODO: Add disconnect/reconnecting logic here
+	switch msg.(type) {
+	case unet.NetReconnected:
+		return &StateConnecting{false}
+
+	case unet.NetDisconnected:
+		ctx.Popup.AddPopup("Server connection failed", time.Second*5)
+		return &StateMainMenu{}
+	}
 	return nil
 }
 
@@ -287,11 +296,11 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicS
 		case "RMST":
 			fmt.Println("DFA: Received Room State. Parsing...")
 
-			table, err := deserializeRoomState(evt.Msg.Payload, ctx.State.PlayerCfg.NickName)
+			table, err := deserializeRoomState(evt.Msg.Payload)
 			if err != nil {
 				fmt.Printf("DFA: Failed to parse room state: %v\n", err)
 				ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "STFL"})
-				ctx.Popup.AddPopup("Failed to join room: invalid state", 3*time.Second)
+				ctx.Popup.AddPopup("Failed to join room: invalid state", time.Second*3)
 				return &StateLobby{}
 			}
 
@@ -305,9 +314,17 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicS
 
 		case "JNFL":
 			fmt.Println("DFA: Join Failed.")
-			ctx.Popup.AddPopup("Failed to join room", 3*time.Second)
+			ctx.Popup.AddPopup("Failed to join room", time.Second*3)
 			return &StateLobby{}
 		}
+
+	case unet.NetReconnected:
+		ctx.Popup.AddPopup("Failed to join room", time.Second*3)
+		return &StateConnecting{false}
+
+	case unet.NetDisconnected:
+		ctx.Popup.AddPopup("Server connection failed", time.Second*3)
+		return &StateMainMenu{}
 	}
 
 	return nil
@@ -325,24 +342,19 @@ func (s *StateInGame) Enter(ctx *ProgCtx) {
 		ctx.State.Table = PokerTable{
 			CommunityCards: make([]Card, 0),
 			Players:        make(map[string]PlayerData),
-			MyNickname:     ctx.State.PlayerCfg.NickName,
 		}
 	}
 
-	// initialize my own state if not set by server
-	// which I think currently is every time
-	_, exists := ctx.State.Table.Players[ctx.State.Table.MyNickname]
-	if !exists {
-		ctx.State.Table.Players[ctx.State.Table.MyNickname] = PlayerData{
-			ChipCount:    ctx.State.PlayerCfg.StartingChips,
-			RoundBet:     0,
-			Cards:        make([]Card, 0),
-			IsMyTurn:     false,
-			IsReady:      false,
-			ActionTaken:  "NONE",
-			ActionAmount: 0,
-		}
-	}
+	// this field is set by main menu
+	data, _ := ctx.State.Table.Players[ctx.State.Nickname]
+	data.RoundBet = 0
+	data.Cards = make([]Card, 0)
+	data.IsMyTurn = false
+	data.IsReady = false
+	data.IsFolded = false
+	data.ActionTaken = "NONE"
+	data.ActionAmount = 0
+	ctx.State.Table.Players[ctx.State.Nickname] = data
 
 	ctx.StateMutex.Unlock()
 	ctx.UI.SetDirty()
@@ -367,15 +379,15 @@ func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState
 		}
 
 		if evt.Action == "CALL" {
-			myData, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+			myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
 			callAmount := min(myData.ChipCount, ctx.State.Table.HighBet)
 			ctx.State.Table.Pot += callAmount
 		}
 
 		if evt.Action == "RDY1" {
-			data, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+			data, _ := ctx.State.Table.Players[ctx.State.Nickname]
 			data.IsReady = true
-			ctx.State.Table.Players[ctx.State.Table.MyNickname] = data
+			ctx.State.Table.Players[ctx.State.Nickname] = data
 		}
 
 		if evt.Action == "GMLV" {
@@ -412,9 +424,9 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 		case "GMST":
 			fmt.Println("Game Started!")
 			ctx.State.Table.RoundPhase = "PreFlop"
-			myData, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+			myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
 			myData.Cards = make([]Card, 0)
-			ctx.State.Table.Players[ctx.State.Table.MyNickname] = myData
+			ctx.State.Table.Players[ctx.State.Nickname] = myData
 			ctx.State.Table.CommunityCards = make([]Card, 0)
 			ctx.State.Table.Pot = 0
 			ctx.State.Table.HighBet = 0
@@ -422,7 +434,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 
 		case "CDTP":
 			// Clear previous hand
-			myData, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+			myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
 			myData.Cards = make([]Card, 0)
 
 			pBytes := []byte(evt.Msg.Payload)
@@ -441,7 +453,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 					}
 				}
 			}
-			ctx.State.Table.Players[ctx.State.Table.MyNickname] = myData
+			ctx.State.Table.Players[ctx.State.Nickname] = myData
 			ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "CDOK"})
 
 		case "GMRD":
@@ -468,7 +480,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 				ctx.State.Table.Players[name] = player
 			}
 
-			if playerName == ctx.State.Table.MyNickname {
+			if playerName == ctx.State.Nickname {
 				data, _ := ctx.State.Table.Players[playerName]
 				ctx.Popup.AddPopup(fmt.Sprintf("Your turn! %t", data.IsMyTurn), 2*time.Second)
 			}
@@ -511,7 +523,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 			ctx.State.Table.CommunityCards = nil
 			ctx.State.Showdown = false
 
-			myData, _ := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+			myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
 			myData.Cards = nil
 			myData.IsMyTurn = false
 			myData.IsReady = false
@@ -519,7 +531,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 			myData.ActionAmount = 0
 
 			ctx.State.Table.RoundPhase = ""
-			ctx.State.Table.Players[ctx.State.Table.MyNickname] = myData
+			ctx.State.Table.Players[ctx.State.Nickname] = myData
 			ctx.State.Table.Pot = 0
 			ctx.State.Table.HighBet = 0
 
@@ -538,9 +550,15 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 				ctx.State.Table.Players[name] = player
 			}
 
-			ctx.Popup.AddPopup("Round ended. Starting new round...", 3*time.Second)
+			ctx.Popup.AddPopup("Round ended. Starting new round...", time.Second*3)
 			ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "DNOK"})
 		}
+	case unet.NetReconnected:
+		return &StateConnecting{true}
+
+	case unet.NetDisconnected:
+		ctx.Popup.AddPopup("Server stopped responding.", time.Second*3)
+		return &StateMainMenu{}
 	}
 
 	return nil
@@ -559,7 +577,7 @@ func validateGameAction(ctx *ProgCtx, action string, amount string) bool {
 		return ctx.State.Showdown
 	}
 
-	myData, exists := table.Players[table.MyNickname]
+	myData, exists := table.Players[ctx.State.Nickname]
 	if !exists {
 		ctx.Popup.AddPopup("Error: Player data not found", 3*time.Second)
 		return false
@@ -732,11 +750,10 @@ func handleShowdown(ctx *ProgCtx, payload string) {
 	ctx.Popup.AddPopup("Showdown! Revealing cards...", 3*time.Second)
 }
 
-func deserializeRoomState(payload string, myNickname string) (PokerTable, error) {
+func deserializeRoomState(payload string) (PokerTable, error) {
 	table := PokerTable{
 		CommunityCards: make([]Card, 0),
 		Players:        make(map[string]PlayerData),
-		MyNickname:     myNickname,
 	}
 
 	readTypes := []unet.ParseTypes{

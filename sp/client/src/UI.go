@@ -12,7 +12,6 @@ import (
 
 func buildUI(ctx *ProgCtx) {
 	ctx.UI.MainMenu = buildMainMenu(ctx)
-	ctx.UI.ServerSelect = buildServerConnectMenu(ctx)
 	ctx.UI.Connecting = buildConnectingScreen(ctx)
 	ctx.UI.Reconnecting = buildReconnectingMenu(ctx)
 	ctx.UI.Game = buildGameScreen(ctx)
@@ -22,8 +21,54 @@ func buildMainMenu(ctx *ProgCtx) UIElement {
 	_ = ctx
 
 	mainMenu := w.NewVStack(10)
+
+	playerStack := w.NewVStack(10)
+	playerLabel := w.NewLabelComponent("Player:", 20, rl.White)
+
+	nickField := w.NewHStack(5)
+	nickLabel := w.NewLabelComponent("Nick:", 20, rl.White)
+	nickTextBox := buildCenteredTextBox("MainMenu_NickBox", &ctx.State.Nickname, 10000)
+	nickField.AddChild(nickLabel)
+	nickField.AddChild(nickTextBox)
+
+	chipsField := w.NewHStack(5)
+	chipsLabel := w.NewLabelComponent("Chips:", 20, rl.White)
+	chipsTextBox := buildCenteredTextBox("MainMenu_NickBox", &ctx.State.ChipsStr, 100)
+	chipsField.AddChild(chipsLabel)
+	chipsField.AddChild(chipsTextBox)
+
+	playerStack.AddChild(playerLabel)
+	playerStack.AddChild(nickField)
+	playerStack.AddChild(chipsField)
+
+	serverStack := w.NewVStack(10)
+	serverLabel := w.NewLabelComponent("Server:", 20, rl.White)
+
+	ipField := w.NewHStack(5)
+	ipLabel := w.NewLabelComponent("IP:", 20, rl.White)
+	ipBox := buildCenteredTextBox("Server_IPBox", &ctx.State.ServerIP, 16)
+	ipField.AddChild(ipLabel)
+	ipField.AddChild(ipBox)
+
+	portField := w.NewHStack(5)
+	portLabel := w.NewLabelComponent("Port:", 20, rl.White)
+	portBox := buildCenteredTextBox("Server_PortBox", &ctx.State.ServerPort, 6)
+	portField.AddChild(portLabel)
+	portField.AddChild(portBox)
+
+	serverStack.AddChild(serverLabel)
+	serverStack.AddChild(ipField)
+	serverStack.AddChild(portField)
+
+	horPS := w.NewHStack(20)
+	horPS.AddChild(playerStack)
+	horPS.AddChild(serverStack)
+	horPSCentered := w.NewCenterComponent(horPS)
+
 	connect_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_ConnectBtn", "Connect", 150, 50))
 	close_btn := w.NewCenterComponent(w.NewButtonComponent("MainMenu_CloseBtn", "Close", 150, 50))
+
+	mainMenu.AddChild(horPSCentered)
 	mainMenu.AddChild(connect_btn)
 	mainMenu.AddChild(close_btn)
 
@@ -33,28 +78,12 @@ func buildMainMenu(ctx *ProgCtx) UIElement {
 	return UIElement{dirty: true, component: mainMenuBounds}
 }
 
-func buildServerConnectMenu(ctx *ProgCtx) UIElement {
-	serverMenu := w.NewHStack(10)
-
-	ipTextBox := w.NewTextBoxComponent("Server_IPBox", &ctx.State.ServerIP, 16)
-	ipTextBoxPanel := w.NewPanelComponent(rl.RayWhite, ipTextBox)
-	ipTextBoxCentered := w.NewCenterComponent(ipTextBoxPanel)
-	ipTextBoxBounded := w.NewBoundsBox(1, 0.3, ipTextBoxCentered)
-	serverMenu.AddChild(ipTextBoxBounded)
-
-	portTextBox := w.NewTextBoxComponent("Server_PortBox", &ctx.State.ServerPort, 6)
-	portTextBoxPanel := w.NewPanelComponent(rl.RayWhite, portTextBox)
-	portTextBoxCentered := w.NewCenterComponent(portTextBoxPanel)
-	portTextBoxBounded := w.NewBoundsBox(1, 0.3, portTextBoxCentered)
-	serverMenu.AddChild(portTextBoxBounded)
-
-	confirmBtn := w.NewCenterComponent(w.NewButtonComponent("Server_ConfirmBtn", "Confirm", 150, 50))
-	serverMenu.AddChild(confirmBtn)
-
-	serverMenuPanel := w.NewPanelComponent(rl.Gray, serverMenu)
-	serverMenuBounds := w.NewBoundsBox(0.9, 0.9, serverMenuPanel)
-
-	return UIElement{dirty: true, component: serverMenuBounds}
+func buildCenteredTextBox(id string, ref *string, maxChars int) w.RGComponent {
+	textBox := w.NewTextBoxComponent(id, ref, maxChars)
+	textBoxPanel := w.NewPanelComponent(rl.RayWhite, textBox)
+	textBoxCentered := w.NewCenterComponent(textBoxPanel)
+	textBoxBounded := w.NewBoundsBox(1, 0.5, textBoxCentered)
+	return textBoxBounded
 }
 
 func buildConnectingScreen(ctx *ProgCtx) UIElement {
@@ -113,7 +142,7 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	// Sort players by name for consistent display
 	var playerNames []string
 	for name := range ctx.State.Table.Players {
-		if name != ctx.State.Table.MyNickname {
+		if name != ctx.State.Nickname {
 			playerNames = append(playerNames, name)
 		}
 	}
@@ -147,7 +176,7 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 		screen.AddOtherPlayer(info)
 	}
 
-	myData, exists := ctx.State.Table.Players[ctx.State.Table.MyNickname]
+	myData, exists := ctx.State.Table.Players[ctx.State.Nickname]
 
 	for _, card := range myData.Cards {
 		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
