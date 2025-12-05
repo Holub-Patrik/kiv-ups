@@ -101,6 +101,9 @@ func handleUIEvent(ctx *ProgCtx, event w.UIEvent) {
 	case "RoomSelect_BackBtn":
 		ctx.UserInputChan <- EvtBackToMain{}
 
+	case "RoomSelect_RefreshBtn":
+		ctx.UserInputChan <- EvtRefreshRooms{}
+
 	case "Game_Bet":
 		ctx.StateMutex.RLock()
 		betStr := strings.TrimSpace(ctx.State.BetAmount)

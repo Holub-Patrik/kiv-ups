@@ -120,6 +120,7 @@ func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicSt
 				ctx.StateMutex.Unlock()
 			} else {
 				ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "RCON"})
+				ctx.State.Reconnected = true
 				return &StateJoiningRoom{}
 			}
 		}
@@ -296,7 +297,7 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicS
 		case "RMST":
 			fmt.Println("DFA: Received Room State. Parsing...")
 
-			table, err := deserializeRoomState(evt.Msg.Payload)
+			table, err := deserializeRoomState(evt.Msg.Payload, ctx.State.Reconnected)
 			if err != nil {
 				fmt.Printf("DFA: Failed to parse room state: %v\n", err)
 				ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "STFL"})
@@ -750,7 +751,7 @@ func handleShowdown(ctx *ProgCtx, payload string) {
 	ctx.Popup.AddPopup("Showdown! Revealing cards...", 3*time.Second)
 }
 
-func deserializeRoomState(payload string) (PokerTable, error) {
+func deserializeRoomState(payload string, reconnected bool) (PokerTable, error) {
 	table := PokerTable{
 		CommunityCards: make([]Card, 0),
 		Players:        make(map[string]PlayerData),
@@ -761,6 +762,7 @@ func deserializeRoomState(payload string) (PokerTable, error) {
 		unet.VarInt,
 		unet.SmallInt,
 	}
+
 	res, consumed, err := unet.ParseMessage(payload, readTypes)
 	if err != nil {
 		return table, errors.Join(err, fmt.Errorf("Error occured during 1st phase"))
@@ -805,6 +807,7 @@ func deserializeRoomState(payload string) (PokerTable, error) {
 		unet.VarInt,
 		unet.VarInt,
 	}
+
 	for range playerCount {
 		res, consumed, err := unet.ParseMessage(nextPayload, readPlayerTypes)
 		if err != nil {
@@ -839,6 +842,8 @@ func deserializeRoomState(payload string) (PokerTable, error) {
 			Cards:        pCards,
 		}
 	}
+
+	fmt.Println(table.Players)
 
 	return table, nil
 }

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cerrno>
+#include <cstring>
 #include <exception>
 #include <iostream>
+#include <string>
 
 extern "C" {
 #include <asm-generic/socket.h>

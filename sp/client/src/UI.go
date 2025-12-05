@@ -82,7 +82,7 @@ func buildCenteredTextBox(id string, ref *string, maxChars int) w.RGComponent {
 	textBox := w.NewTextBoxComponent(id, ref, maxChars)
 	textBoxPanel := w.NewPanelComponent(rl.RayWhite, textBox)
 	textBoxCentered := w.NewCenterComponent(textBoxPanel)
-	textBoxBounded := w.NewBoundsBox(1, 0.5, textBoxCentered)
+	textBoxBounded := w.NewBoundsBox(1, 1, textBoxCentered)
 	return textBoxBounded
 }
 
@@ -263,8 +263,12 @@ func buildRoomSelectUI(ctx *ProgCtx) UIElement {
 		roomList.AddChild(centered_btn)
 	}
 
-	back_btn := w.NewCenterComponent(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
-	roomList.AddChild(back_btn)
+	backBtn := w.NewCenterComponent(w.NewButtonComponent("RoomSelect_BackBtn", "Back", 150, 50))
+	refresBtn := w.NewCenterComponent(w.NewButtonComponent("RoomSelect_RefreshBtn", "Refresh", 150, 50))
+	buttonStack := w.NewHStack(10)
+	buttonStack.AddChild(backBtn)
+	buttonStack.AddChild(refresBtn)
+	roomList.AddChild(buttonStack)
 
 	roomListPanel := w.NewPanelComponent(rl.DarkBlue, roomList)
 	roomBoundsBox := w.NewBoundsBox(0.4, 0.6, roomListPanel)
