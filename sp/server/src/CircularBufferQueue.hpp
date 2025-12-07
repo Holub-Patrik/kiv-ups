@@ -19,6 +19,7 @@
 
 #include "Babel.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -28,7 +29,7 @@ constexpr auto wait_time = std::chrono::milliseconds(20);
 namespace CB {
 
 template <typename Type, usize Size> struct Buffer {
-  arr<Type, Size> data;
+  arr<Type, Size> data{};
   std::atomic<u64> read_pos = 0;
   std::atomic<u64> write_pos = 1;
 

@@ -34,15 +34,14 @@ private:
         break; // No more messages
 
       const auto& msg = msg_opt.value();
-      std::cout << std::format("Processing (Code: {}) for state {} on FD {}\n",
-                               msg.code, (int)player.state,
-                               player.sock.get_fd());
+      std::cout << "Processing (Code: " << msg.code << ") for state "
+                << static_cast<int>(player.state) << " on FD "
+                << player.sock.get_fd() << std::endl;
 
       // Disconnect on unknown message code
       if (!is_valid_code(msg.code)) {
-        std::cerr << std::format(
-            "Unknown message code '{}' from FD {}, disconnecting\n", msg.code,
-            player.sock.get_fd());
+        std::cerr << "Unknown message code: " << msg.code << "from FD "
+                  << player.sock.get_fd() << ", disconnecting" << std::endl;
         player.disconnect();
         break;
       }
@@ -58,8 +57,8 @@ private:
           }
           handle_conn(player, msg.payload.value());
         } else {
-          std::cerr << std::format("Unexpected message {} in Connected state\n",
-                                   msg.code);
+          std::cerr << "Unexpected message " << msg.code
+                    << " in Connected state" << std::endl;
           player.disconnect();
         }
         break;
@@ -77,8 +76,8 @@ private:
           }
           handle_pinf(player, msg.payload.value());
         } else {
-          std::cerr << std::format(
-              "Unexpected message {} in SendingRooms state\n", msg.code);
+          std::cerr << "Unexpected message " << msg.code
+                    << " in SendingRooms state" << std::endl;
           player.disconnect();
         }
 
@@ -91,8 +90,8 @@ private:
           }
           handle_pinf(player, msg.payload.value());
         } else {
-          std::cerr << std::format(
-              "Unexpected message {} in AwaitingRooms state\n", msg.code);
+          std::cerr << "Unexpected message " << msg.code
+                    << " in AwaitingRooms state" << std::endl;
           player.disconnect();
         }
         break;
@@ -101,11 +100,12 @@ private:
         if (msg.code == Msg::RMOK) {
           send_next_room(player);
         } else if (msg.code == Msg::RMFL) {
-          std::cerr << "Client reported room receive failure, disconnecting\n";
+          std::cerr << "Client reported room receive failure, disconnecting"
+                    << std::endl;
           player.disconnect();
         } else {
-          std::cerr << std::format(
-              "Unexpected message {} in SendingRooms state\n", msg.code);
+          std::cerr << "Unexpected message " << msg.code
+                    << " in SendingRooms state" << std::endl;
           player.disconnect();
         }
         break;
@@ -129,15 +129,15 @@ private:
           player.room_send_index = 0;
           send_room_info(player);
         } else {
-          std::cerr << std::format(
-              "Unexpected message {} in AwaitingJoin state\n", msg.code);
+          std::cerr << "Unexpected message " << msg.code
+                    << " in AwaitingJoin state" << std::endl;
           player.disconnect();
         }
         break;
 
       case PlayerState::InRoom:
-        std::cerr << std::format(
-            "Player in InRoom state but still in main list, disconnecting\n");
+        std::cerr << "Player in InRoom state but still in main list, "
+                     "disconnecting\n";
         player.disconnect();
         break;
       }
@@ -182,8 +182,8 @@ private:
       for (const auto& seat : room.ctx.seats) {
         if (seat.is_occupied && seat.nickname == nickname &&
             seat.connection == nullptr) {
-          std::cout << std::format("Reconnect candidate {} found in room {}\n",
-                                   nickname, i);
+          std::cout << "Reconnect candidate " << nickname << " found in room "
+                    << i << std::endl;
           player.reconnect_index = i;
           player.send_message({str{Msg::RCON}, null});
           player.state = PlayerState::AwaitingReconnect;
@@ -193,7 +193,7 @@ private:
     }
 
     // New player
-    std::cout << std::format("New player {} connected\n", nickname);
+    std::cout << "New player " << nickname << " connected\n";
     player.send_message({str{Msg::PNOK}, null});
     player.state = PlayerState::AwaitingRooms;
   }
@@ -209,9 +209,8 @@ private:
 
     player.chips = chips;
 
-    std::cout << std::format(
-        "Received player info from {} ({}), sending PIOK\n", player.nickname,
-        player.chips);
+    std::cout << "Received player info from " << player.nickname << " | "
+              << player.chips << ", sending PIOK" << std::endl;
 
     player.send_message({str{Msg::PIOK}, null});
     player.state = PlayerState::AwaitingJoin;
@@ -222,13 +221,13 @@ private:
       const auto& room = *rooms[player.room_send_index];
       std::string room_payload = room.serialize();
 
-      std::cout << std::format("Sending room {} to {}\n", room.name,
-                               player.nickname);
+      std::cout << "Sending room " << room.name << " to " << player.nickname
+                << std::endl;
       player.send_message({str{Msg::ROOM}, room_payload});
       player.room_send_index++;
     } else {
-      std::cout << std::format("Done sending rooms to {}, sending DONE\n",
-                               player.nickname);
+      std::cout << "Done sending rooms to " << player.nickname
+                << ", sending DONE" << std::endl;
       player.send_message({str{Msg::DONE}, null});
       player.state = PlayerState::AwaitingJoin;
     }
@@ -250,21 +249,21 @@ private:
       const auto& room = *rooms[i];
       if (room.id == req_id) {
         if (!room.can_player_join()) {
-          std::cerr << std::format("Room {} full, rejecting {}\n", req_id,
-                                   player.nickname);
+          std::cerr << "Room " << req_id << " full, rejecting "
+                    << player.nickname << std::endl;
           player.send_message({str{Msg::JNFL}, null});
           return null;
         }
 
-        std::cout << std::format("Accepted {} into room {}\n", player.nickname,
-                                 req_id);
+        std::cout << "Accepted " << player.nickname << " into room " << req_id
+                  << std::endl;
         player.send_message({str{Msg::JNOK}, null});
         return i;
       }
     }
 
-    std::cerr << std::format("Room {} not found for {}\n", req_id,
-                             player.nickname);
+    std::cerr << "Room " << req_id << " not found for " << player.nickname
+              << std::endl;
     player.send_message({str{Msg::JNFL}, null});
     return null;
   }
@@ -283,10 +282,8 @@ private:
           }
 
           if (!players[p_idx]->get_ping()) {
-            std::cout << std::format("Player {:d} didn't send ping", p_idx)
-                      << std::endl;
+            std::cout << "Player " << p_idx << " didn't send ping" << std::endl;
             players[p_idx]->disconnect();
-            // disconnect player
           }
 
           players[p_idx]->clear_ping();

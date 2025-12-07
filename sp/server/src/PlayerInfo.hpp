@@ -4,9 +4,12 @@
 #include "MessageSerde.hpp"
 #include "SockWrapper.hpp"
 
+#include <array>
 #include <ostream>
+extern "C" {
 #include <sys/socket.h>
 #include <unistd.h>
+}
 
 constexpr std::size_t MSG_BATCH_SIZE = 10;
 constexpr int MAX_CONSECUTIVE_ERRORS = 3;
@@ -77,7 +80,7 @@ public:
   }
 
   void accept_messages() {
-    std::array<char, 256> byte_buf{0};
+    arr<char, 256> byte_buf{0};
 
     while (!disconnected) {
       const auto bytes_read =
@@ -99,8 +102,8 @@ public:
       Net::Serde::ParseResults results{};
 
       while (total_parsed_bytes < static_cast<usize>(bytes_read)) {
-        const auto& start = byte_buf.begin() + total_parsed_bytes;
-        const auto& end = byte_buf.begin() + bytes_read;
+        const auto start = byte_buf.begin() + total_parsed_bytes;
+        const auto end = byte_buf.begin() + bytes_read;
 
         results = parser.parse_bytes(std::string_view{start, end});
 
@@ -118,9 +121,8 @@ public:
             payload = results.payload;
           }
 
-          std::cout << std::format("Msg parsed -> Code: {}{}", results.code,
-                                   payload ? " | Payload: " + payload.value()
-                                           : "")
+          std::cout << "Msg parsed -> Code: " << results.code
+                    << (payload ? " | Payload: " + payload.value() : "")
                     << std::endl;
 
           if (results.code == "PING") {
@@ -143,9 +145,8 @@ public:
   auto send_message(const Net::MsgStruct& msg) -> void {
     const auto& msg_str = msg.to_string();
 
-    std::cout << std::format("Sending -> Code: {}{}", msg.code,
-                             msg.payload ? "| Payload: " + msg.payload.value()
-                                         : "")
+    std::cout << "Sending -> Code: " << msg.code
+              << (msg.payload ? "| Payload: " + msg.payload.value() : "")
               << std::endl;
 
     const auto sent_bytes =

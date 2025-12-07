@@ -1,7 +1,7 @@
 #pragma once
 
+#include <cmath>
 #include <cstddef>
-#include <format>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -37,7 +37,7 @@ struct MsgStruct {
     ss << code;
     if (payload) {
       const auto& contents = payload.value();
-      const auto& len_str = std::format("{:04d}", contents.size());
+      const auto& len_str = string_format("%04lu", contents.size());
       ss << len_str << contents;
     }
 
@@ -136,20 +136,17 @@ inline opt<std::pair<str, usize>> read_str(const str& payload,
 
 // All these function do not check number bounds, if numbers outside of their
 // capabilities are inserted, the protocol will most likely fail
-inline str write_sm_int(usize num) { return std::format("{:02d}", num); }
-inline str write_bg_int(usize num) { return std::format("{:04d}", num); }
+inline str write_sm_int(usize num) { return string_format("%02lu", num); }
+inline str write_bg_int(usize num) { return string_format("%02lu", num); }
 inline str write_var_int(i64 num) {
   if (num == 0) {
-    return write_sm_int(1) + std::format("{:d}", num);
+    return write_sm_int(1) + string_format("%ld", num);
   }
   const auto abs_d_num = static_cast<double>(std::abs(num));
   const auto log10_floor = std::floor(std::log10(abs_d_num)) + 1;
   const auto digit_count = static_cast<usize>(log10_floor + (num < 0 ? 1 : 0));
-  std::cout << std::format("What? {} {} {} {}", num, abs_d_num, log10_floor,
-                           digit_count)
-            << std::endl;
 
-  return write_sm_int(digit_count) + std::format("{:d}", num);
+  return write_sm_int(digit_count) + string_format("%ld", num);
 }
 inline str write_net_str(const str& usr_str) {
   return write_bg_int(usr_str.size()) + usr_str;
@@ -254,8 +251,7 @@ public:
 
     case MainPart::Size:
       if (byte < '0' || byte > '9') {
-        std::cout << std::format("Non numeric character in size: {}", byte)
-                  << std::endl;
+        std::cout << "Non numeric character in size:" << byte << std::endl;
         return ParserState::Invalid;
       }
 
