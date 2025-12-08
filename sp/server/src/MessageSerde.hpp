@@ -137,7 +137,7 @@ inline opt<std::pair<str, usize>> read_str(const str& payload,
 // All these function do not check number bounds, if numbers outside of their
 // capabilities are inserted, the protocol will most likely fail
 inline str write_sm_int(usize num) { return string_format("%02lu", num); }
-inline str write_bg_int(usize num) { return string_format("%02lu", num); }
+inline str write_bg_int(usize num) { return string_format("%04lu", num); }
 inline str write_var_int(i64 num) {
   if (num == 0) {
     return write_sm_int(1) + string_format("%ld", num);

@@ -14,8 +14,6 @@
 class Room;
 class RoomState;
 
-constexpr usize ROOM_MAX_PLAYERS = 4;
-
 enum class RoundPhase { PreFlop, Flop, Turn, River };
 
 namespace GameUtils {
@@ -70,7 +68,7 @@ struct PlayerSeat {
 };
 
 struct RoomContext {
-  std::array<PlayerSeat, ROOM_MAX_PLAYERS> seats;
+  std::vector<PlayerSeat> seats;
   GameUtils::Deck deck;
   vec<u8> community_cards;
   int pot = 0;
@@ -78,6 +76,9 @@ struct RoomContext {
   int dealer_idx = 0;
   int current_actor = -1;
   RoundPhase round_phase = RoundPhase::PreFlop;
+
+  RoomContext() = delete;
+  RoomContext(int p_count);
 
   int count_active_players() const;
   int count_occupied_seats() const;
@@ -104,25 +105,23 @@ class Room final {
 private:
   std::thread room_thread;
   std::atomic<bool> running = false;
+
   std::mutex incoming_mtx;
   vec<uq_ptr<PlayerInfo>> incoming_queue;
-  vec<uq_ptr<PlayerInfo>>& return_arr;
   std::mutex& return_mtx;
+  vec<uq_ptr<PlayerInfo>>& return_arr;
 
   uq_ptr<RoomState> current_state;
   uq_ptr<RoomState> next_state_ptr;
   bool pending_transition = false;
 
-  std::mutex up_mtx;
-  vec<str> updates;
-  str serialize_udpdate();
+  bool room_locked = false;
+  time_point<hr_clock> last_ping = hr_clock::now();
 
 public:
   usize id;
   str name;
   RoomContext ctx;
-
-  std::atomic<bool> dirty;
 
   Room(std::size_t id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
        std::mutex& return_mutex);
@@ -136,8 +135,7 @@ public:
   void accept_player(uq_ptr<PlayerInfo>&& p);
   void reconnect_player(uq_ptr<PlayerInfo>&& p);
   str serialize() const;
-  str serialize_up();
-  bool can_player_join() const;
+  bool can_player_join(const str& p_name = "") const;
   void room_logic();
 
 private:

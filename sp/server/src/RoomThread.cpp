@@ -47,6 +47,8 @@ bool PlayerSeat::is_active() const {
   return is_occupied && connection != nullptr && connection->is_connected();
 }
 
+RoomContext::RoomContext(int p_count) { seats.resize(p_count); }
+
 int RoomContext::count_active_players() const {
   int c = 0;
   for (const auto& s : seats) {
@@ -162,7 +164,8 @@ str RoomContext::serialize() const {
 
 Room::Room(std::size_t id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
            std::mutex& return_mutex)
-    : id(id), name(name), return_arr(return_vec), return_mtx(return_mutex) {
+    : id(id), name(name), return_arr(return_vec), return_mtx(return_mutex),
+      ctx(4) {
   current_state = std::make_unique<LobbyState>();
   running = true;
   room_thread = std::thread(&Room::room_logic, this);
@@ -188,36 +191,23 @@ void Room::reconnect_player(uq_ptr<PlayerInfo>&& p) {
 str Room::serialize() const {
   using namespace Net::Serde;
 
-  int occ = 0;
-  for (const auto& s : ctx.seats)
-    if (s.is_occupied)
-      occ++;
-
-  return write_bg_int(id) + write_net_str(name) + write_sm_int(occ) +
-         write_sm_int(ROOM_MAX_PLAYERS);
+  return write_bg_int(id) + write_net_str(name) +
+         write_sm_int(ctx.count_occupied_seats()) +
+         write_sm_int(ctx.seats.size());
 }
 
-str Room::serialize_up() {
-  using namespace Net::Serde;
+bool Room::can_player_join(const str& p_name) const {
+  if (room_locked) {
+    for (const auto& p : ctx.seats) {
+      if (p.nickname == p_name) {
+        return true;
+      }
+    }
 
-  std::lock_guard g{up_mtx};
-  std::stringstream ss;
-
-  ss << write_bg_int(updates.size());
-  for (const auto& update : updates) {
-    ss << update;
+    return false;
   }
-  updates.clear();
 
-  return ss.str();
-}
-
-bool Room::can_player_join() const {
-  int occ = 0;
-  for (const auto& s : ctx.seats)
-    if (s.is_occupied)
-      occ++;
-  return occ < ROOM_MAX_PLAYERS;
+  return ctx.count_occupied_seats() < ctx.seats.size();
 }
 
 void Room::room_logic() {
@@ -225,6 +215,33 @@ void Room::room_logic() {
     current_state->on_enter(*this, ctx);
 
   while (running) {
+    const auto now = hr_clock::now();
+    const auto diff = dur_cast<seconds>(now - last_ping);
+
+    if (diff.count() > 30) {
+      last_ping = now;
+      for (auto& seat : ctx.seats) {
+        if (seat.connection == nullptr) {
+          continue;
+        }
+
+        if (!seat.connection->is_connected()) {
+          seat.connection = nullptr;
+          continue;
+        }
+
+        if (!seat.connection->get_ping()) {
+          std::cout << "Player " << seat.nickname << " didn't send ping"
+                    << std::endl;
+          seat.connection->disconnect();
+          seat.connection = nullptr;
+        }
+
+        seat.connection->clear_ping();
+        seat.connection->send_ping();
+      }
+    }
+
     process_incoming_players();
     process_network_io();
 
@@ -240,7 +257,7 @@ void Room::room_logic() {
       pending_transition = false;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
 
@@ -322,7 +339,6 @@ void Room::process_network_io() {
       std::cout << "Player " << seat.nickname << " diconnected (seat " << i
                 << ")" << std::endl;
       seat.connection = nullptr;
-      seat.is_ready = false;
       continue;
     }
 
@@ -360,6 +376,7 @@ void Room::process_network_io() {
           seat.connection = nullptr;
           if (current_state->get_name() == "Lobby") {
             seat.is_occupied = false;
+            seat.is_ready = false;
             seat.nickname = "";
           }
           ctx.broadcast_ex(i, Msg::PACT, act_str);
@@ -379,7 +396,7 @@ void Room::process_network_io() {
 void LobbyState::on_enter(Room& room, RoomContext& ctx) {
   std::cout << "State: Enter Lobby" << std::endl;
 
-  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
+  for (int i = 0; i < ctx.seats.size(); ++i) {
     if (ctx.seats[i].is_occupied && ctx.seats[i].connection == nullptr) {
       std::cout << "Lobby cleanup: Removing disconnected player from seat " << i
                 << std::endl;
@@ -399,7 +416,7 @@ void LobbyState::on_leave(Room& room, RoomContext& ctx) {
 }
 
 void LobbyState::on_tick(Room& room, RoomContext& ctx) {
-  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
+  for (int i = 0; i < ctx.seats.size(); ++i) {
     if (ctx.seats[i].is_occupied && ctx.seats[i].connection == nullptr) {
       std::cout << "Lobby cleanup: Removing disconnected player from seat " << i
                 << std::endl;
@@ -443,7 +460,7 @@ void DealingState::on_enter(Room& room, RoomContext& ctx) {
 
   ctx.round_phase = RoundPhase::PreFlop;
 
-  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
+  for (int i = 0; i < ctx.seats.size(); ++i) {
     if (ctx.seats[i].is_active() && ctx.seats[i].is_ready) {
       u8 c1 = ctx.deck.draw();
       u8 c2 = ctx.deck.draw();
@@ -525,9 +542,9 @@ void BettingState::on_enter(Room& room, RoomContext& ctx) {
     s.action_taken = GameUtils::PlayerAction::None;
   }
 
-  int start_idx = (ctx.dealer_idx + 1) % ROOM_MAX_PLAYERS;
-  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
-    int idx = (start_idx + i) % ROOM_MAX_PLAYERS;
+  int start_idx = (ctx.dealer_idx + 1) % ctx.seats.size();
+  for (int i = 0; i < ctx.seats.size(); ++i) {
+    int idx = (start_idx + i) % ctx.seats.size();
     if (ctx.seats[idx].is_active() && !ctx.seats[idx].is_folded &&
         ctx.seats[idx].is_ready) {
       action_queue.push_back(idx);
@@ -564,10 +581,10 @@ void BettingState::start_next_turn(RoomContext& ctx) {
 
 void BettingState::requeue_others(RoomContext& ctx, int aggressor_idx) {
   action_queue.clear();
-  int start_idx = (aggressor_idx + 1) % ROOM_MAX_PLAYERS;
+  int start_idx = (aggressor_idx + 1) % ctx.seats.size();
 
-  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
-    int idx = (start_idx + i) % ROOM_MAX_PLAYERS;
+  for (int i = 0; i < ctx.seats.size(); ++i) {
+    int idx = (start_idx + i) % ctx.seats.size();
     if (idx == aggressor_idx)
       continue;
 
@@ -740,7 +757,7 @@ void ShowdownState::on_leave(Room& room, RoomContext& ctx) {}
 
 void ShowdownState::on_tick(Room& room, RoomContext& ctx) {
   int count_players_accepted = 0;
-  for (int i = 0; i < ROOM_MAX_PLAYERS; ++i) {
+  for (int i = 0; i < ctx.seats.size(); ++i) {
     if (ctx.seats[i].showdowm_okay) {
       count_players_accepted++;
     }

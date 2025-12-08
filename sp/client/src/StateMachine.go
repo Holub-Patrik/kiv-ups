@@ -216,7 +216,7 @@ func (s *StateRequestingRooms) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) Lo
 			}
 
 		case "DONE":
-			// ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "DNOK"})
+			ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "DNOK"})
 			return &StateLobby{}
 		}
 
@@ -348,13 +348,15 @@ func (s *StateInGame) Enter(ctx *ProgCtx) {
 
 	// this field is set by main menu
 	data, _ := ctx.State.Table.Players[ctx.State.Nickname]
-	data.RoundBet = 0
-	data.Cards = make([]Card, 0)
-	data.IsMyTurn = false
-	data.IsReady = false
-	data.IsFolded = false
-	data.ActionTaken = "NONE"
-	data.ActionAmount = 0
+	if data.Cards == nil {
+		data.Cards = make([]Card, 0)
+	}
+	data.IsMyTurn = data.IsMyTurn || false
+	data.IsReady = data.IsReady || false
+	data.IsFolded = data.IsFolded || false
+	if data.ActionTaken == "" {
+		data.ActionTaken = "NONE"
+	}
 	ctx.State.Table.Players[ctx.State.Nickname] = data
 
 	ctx.StateMutex.Unlock()
@@ -537,10 +539,13 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 			ctx.State.Table.HighBet = 0
 
 			// Reset player round-specific state
-			pCards := make([]Card, 0)
-			pCards = append(pCards, Card{Hidden: true})
-			pCards = append(pCards, Card{Hidden: true})
 			for name, player := range ctx.State.Table.Players {
+				pCards := make([]Card, 0)
+				if name != ctx.State.Nickname {
+					pCards = append(pCards, Card{Hidden: true})
+					pCards = append(pCards, Card{Hidden: true})
+				}
+
 				player.IsReady = false
 				player.IsMyTurn = false
 				player.Cards = pCards
@@ -711,6 +716,8 @@ func handlePlayerAction(ctx *ProgCtx, payload string) {
 		ctx.Popup.AddPopup(fmt.Sprintf("%s folded", pNick), 2*time.Second)
 	case "CHCK":
 		ctx.Popup.AddPopup(fmt.Sprintf("%s checked", pNick), 2*time.Second)
+	case "LEFT":
+		ctx.Popup.AddPopup(fmt.Sprintf("%s left", pNick), 2*time.Second)
 	}
 
 	ctx.State.Table.Players[pNick] = player

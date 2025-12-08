@@ -103,6 +103,13 @@ private:
           std::cerr << "Client reported room receive failure, disconnecting"
                     << std::endl;
           player.disconnect();
+        } else if (msg.code == Msg::DNOK) {
+          player.state = PlayerState::AwaitingJoin;
+        } else if (msg.code == Msg::DNFL) {
+          std::cerr
+              << "Client reported done sending rooms failure, disconnecting"
+              << std::endl;
+          player.disconnect();
         } else {
           std::cerr << "Unexpected message " << msg.code
                     << " in SendingRooms state" << std::endl;
@@ -229,7 +236,6 @@ private:
       std::cout << "Done sending rooms to " << player.nickname
                 << ", sending DONE" << std::endl;
       player.send_message({str{Msg::DONE}, null});
-      player.state = PlayerState::AwaitingJoin;
     }
   }
 
@@ -274,7 +280,7 @@ private:
       const auto now = hr_clock::now();
       const auto diff = dur_cast<seconds>(now - last_ping);
 
-      if (diff.count() > 10) {
+      if (diff.count() > 30) {
         last_ping = now;
         for (i64 p_idx = players.size() - 1; p_idx >= 0; p_idx--) {
           if (!players[p_idx]->is_connected()) {
