@@ -178,6 +178,7 @@ class BettingState : public RoomState {
 private:
   std::deque<int> action_queue;
   bool has_bet_occurred = false;
+  time_point<hr_clock> last_action_time;
 
   void start_next_turn(RoomContext& ctx);
   void requeue_others(RoomContext&, int aggressor_idx);
@@ -194,6 +195,9 @@ public:
 };
 
 class ShowdownState : public RoomState {
+private:
+  time_point<hr_clock> sd_ok_timeout_start;
+
 public:
   void on_enter(Room& room, RoomContext& ctx) override;
   void on_leave(Room& room, RoomContext& ctx) override;

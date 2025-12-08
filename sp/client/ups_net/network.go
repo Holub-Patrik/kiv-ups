@@ -12,7 +12,7 @@ const (
 	chanBufSize  = 100
 	arrBufSize   = 256
 	magicStr     = "PKR"
-	reconnectMax = 30 // 30 seconds total
+	reconnectMax = 30
 	reconnectInt = 1 * time.Second
 )
 
@@ -39,7 +39,6 @@ type NetConnect struct {
 type NetDisconnect struct{}
 type NetShutdown struct{}
 
-// Network handler with reconnection support
 type NetHandler struct {
 	// Connection state
 	conn     net.Conn
@@ -61,6 +60,14 @@ type NetHandler struct {
 		active   bool
 		timer    *time.Timer
 	}
+
+	// communication timeout handling
+	commMutex           sync.RWMutex
+	lastCommunication   time.Time
+	commTimer           *time.Timer
+	commTimeout         time.Duration // e.g., 65 seconds
+	inHealthCheck       bool
+	healthCheckDeadline time.Time
 }
 
 type ConnectionState int
@@ -78,11 +85,19 @@ func (nh *NetHandler) Init() {
 	nh.msgOutChan = make(chan NetMsg, chanBufSize)
 	nh.state.Store(StateDisconnected)
 	nh.shutdown.Store(false)
+
+	nh.commTimeout = 65 * time.Second
+	nh.commTimer = time.NewTimer(nh.commTimeout)
+	nh.commTimer.Stop() // Don't start until connected
+	nh.inHealthCheck = false
 }
 
 // Run is the main network thread
 func (nh *NetHandler) Run() {
 	fmt.Println("Network thread starting")
+
+	healthCheckTicker := time.NewTicker(1 * time.Second)
+	defer healthCheckTicker.Stop()
 
 	for !nh.shutdown.Load() {
 		select {
@@ -91,6 +106,13 @@ func (nh *NetHandler) Run() {
 
 		case msg := <-nh.msgOutChan:
 			nh.sendMessage(msg)
+
+		case <-nh.commTimer.C:
+			fmt.Println("Communication timeout - sending health check")
+			nh.sendHealthCheck()
+
+		case <-healthCheckTicker.C:
+			nh.checkHealthCheckDeadline()
 
 		default:
 			time.Sleep(10 * time.Millisecond)
@@ -143,6 +165,10 @@ func (nh *NetHandler) handleDisconnect() {
 		nh.reconnectData.timer.Stop()
 	}
 	nh.reconnectData.Unlock()
+
+	if nh.commTimer != nil {
+		nh.commTimer.Stop()
+	}
 
 	nh.disconnectInternal()
 	nh.setState(StateDisconnected)
@@ -202,6 +228,8 @@ func (nh *NetHandler) connectWithRetry(host, port string, isReconnect bool) {
 		if err == nil {
 			nh.setConnection(conn)
 			nh.setState(StateConnected)
+
+			nh.startCommunicationMonitoring()
 
 			if isReconnect {
 				nh.eventChan <- NetReconnected{}
@@ -269,6 +297,7 @@ func (nh *NetHandler) readerLoop(conn net.Conn) {
 			return
 		}
 
+		nh.resetCommunicationTimer()
 		fmt.Printf("Received %d bytes\n", bytesRead)
 		nh.processBuffer(buffer[:bytesRead], &parser)
 	}
@@ -288,6 +317,21 @@ func (nh *NetHandler) processBuffer(buffer []byte, parser *Parser) {
 
 		if results.parser_done {
 			fmt.Printf("Parsed message: %s\n", results.code)
+
+			if results.code == "ALV!" {
+				if nh.inHealthCheck {
+					fmt.Println("Health check passed")
+					nh.inHealthCheck = false
+					nh.resetCommunicationTimer()
+					totalParsed += results.BytesParsed
+					parser.ResetParser()
+					continue
+				} else {
+					fmt.Println("Unexpected alive message, disconnecting")
+					nh.handleConnectionLost()
+					return
+				}
+			}
 
 			if results.code == "PING" {
 				nh.sendMessage(NetMsg{Code: "PING"})
@@ -335,10 +379,9 @@ func (nh *NetHandler) handleConnectionLost() {
 	nh.eventChan <- NetDisconnected{}
 }
 
-func (nh *NetHandler) sendMessage(msg NetMsg) {
+func (nh *NetHandler) sendMessage(msg NetMsg) error {
 	if nh.getState() != StateConnected {
-		fmt.Println("Cannot send, not connected")
-		return
+		return fmt.Errorf("not connected")
 	}
 
 	nh.connMtx.RLock()
@@ -346,19 +389,27 @@ func (nh *NetHandler) sendMessage(msg NetMsg) {
 	nh.connMtx.RUnlock()
 
 	if conn == nil {
-		return
+		return fmt.Errorf("no connection")
 	}
+
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	defer conn.SetWriteDeadline(time.Time{}) // Reset deadline
 
 	data := msg.ToString()
 	_, err := conn.Write([]byte(data))
 
 	if err != nil {
-		fmt.Printf("Send error: %v\n", err)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			fmt.Println("Write timeout - connection may be dead")
+		}
+
 		nh.handleConnectionLost()
+		return err
 	}
+
+	return nil
 }
 
-// Helper methods
 func (nh *NetHandler) getState() ConnectionState {
 	return nh.state.Load().(ConnectionState)
 }
@@ -374,13 +425,65 @@ func (nh *NetHandler) setConnection(conn net.Conn) {
 }
 
 func (nh *NetHandler) cleanup() {
+	if nh.commTimer != nil {
+		nh.commTimer.Stop()
+	}
+
 	nh.disconnectInternal()
 	close(nh.eventChan)
 	close(nh.commandChan)
 	close(nh.msgOutChan)
 }
 
-// Public API for game thread
+func (nh *NetHandler) startCommunicationMonitoring() {
+	nh.commMutex.Lock()
+	nh.lastCommunication = time.Now()
+	nh.commTimer.Reset(nh.commTimeout)
+	nh.inHealthCheck = false
+	nh.commMutex.Unlock()
+}
+
+func (nh *NetHandler) resetCommunicationTimer() {
+	nh.commMutex.Lock()
+	defer nh.commMutex.Unlock()
+
+	nh.lastCommunication = time.Now()
+	if nh.commTimer != nil {
+		nh.commTimer.Stop()
+		nh.commTimer.Reset(nh.commTimeout)
+	}
+	nh.inHealthCheck = false // Any communication resets health check
+}
+
+func (nh *NetHandler) checkHealthCheckDeadline() {
+	nh.commMutex.RLock()
+	inCheck := nh.inHealthCheck
+	deadline := nh.healthCheckDeadline
+	nh.commMutex.RUnlock()
+
+	if inCheck && time.Now().After(deadline) {
+		fmt.Println("Health check failed - no ALV! response")
+		nh.handleConnectionLost()
+	}
+}
+
+func (nh *NetHandler) sendHealthCheck() {
+	nh.commMutex.RLock()
+	inCheck := nh.inHealthCheck
+	nh.commMutex.RUnlock()
+
+	if inCheck {
+		return
+	}
+
+	nh.commMutex.Lock()
+	nh.inHealthCheck = true
+	nh.healthCheckDeadline = time.Now().Add(10 * time.Second)
+	nh.commMutex.Unlock()
+
+	nh.msgOutChan <- NetMsg{Code: "ALV?"}
+}
+
 func (nh *NetHandler) EventChan() <-chan NetEvent {
 	return nh.eventChan
 }

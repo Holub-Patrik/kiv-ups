@@ -36,10 +36,10 @@ func (gs *GameScreen) Calculate(bounds rl.Rectangle) {
 	gs.bounds = bounds
 	padding := gs.padding
 
-	const potH = 0.08
+	const potH = 0.13
 	const riverH = 0.15
 	const oppH = 0.35
-	const handH = 0.15
+	const handH = 0.10
 	const actionH = 0.12
 
 	totalPad := padding * 6

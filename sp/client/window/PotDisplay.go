@@ -9,10 +9,11 @@ type PotDisplayComponent struct {
 	bounds   rl.Rectangle
 	Pot      int
 	RoundBet int
+	MyChips  int
 }
 
-func NewPotDisplayComponent(pot, roundBet int) *PotDisplayComponent {
-	return &PotDisplayComponent{Pot: pot, RoundBet: roundBet}
+func NewPotDisplayComponent(pot, roundBet, chips int) *PotDisplayComponent {
+	return &PotDisplayComponent{Pot: pot, RoundBet: roundBet, MyChips: chips}
 }
 
 func (p *PotDisplayComponent) Calculate(bounds rl.Rectangle) { p.bounds = bounds }
@@ -23,9 +24,10 @@ func (p *PotDisplayComponent) Draw(eventChannel chan<- UIEvent) {
 
 	potText := fmt.Sprintf("Pot: %d", p.Pot)
 	roundText := fmt.Sprintf("Round: %d", p.RoundBet)
+	myChipsText := fmt.Sprintf("MyChips: %d", p.MyChips)
 
 	// Center vertically
-	totalH := float32(24 + 16 + 5)
+	totalH := float32(24 + 16 + 16 + 5)
 	y := p.bounds.Y + (p.bounds.Height-totalH)/2
 
 	potW := rl.MeasureText(potText, 24)
@@ -33,6 +35,9 @@ func (p *PotDisplayComponent) Draw(eventChannel chan<- UIEvent) {
 
 	roundW := rl.MeasureText(roundText, 16)
 	rl.DrawText(roundText, int32(p.bounds.X+(p.bounds.Width-float32(roundW))/2), int32(y+29), 16, rl.White)
+
+	chipsW := rl.MeasureText(myChipsText, 16)
+	rl.DrawText(myChipsText, int32(p.bounds.X+(p.bounds.Width-float32(chipsW))/2), int32(y+50), 16, rl.White)
 }
 
 func (p *PotDisplayComponent) GetBounds() rl.Rectangle { return p.bounds }

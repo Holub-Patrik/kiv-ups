@@ -92,7 +92,7 @@ public:
         break;
       } else if (bytes_read < 0) {
         std::cout << "Read error" << std::endl;
-        break; // error
+        break;
       }
 
       std::cout << "Received " << bytes_read << " bytes on FD " << sock.get_fd()
@@ -105,7 +105,7 @@ public:
         const auto start = byte_buf.begin() + total_parsed_bytes;
         const auto end = byte_buf.begin() + bytes_read;
 
-        results = parser.parse_bytes(std::string_view{start, end});
+        results = parser.parse_bytes(str_v{start, end});
 
         if (results.error_occured) {
           std::cerr << "Error occured on FD: " << sock.get_fd() << "\n";
@@ -125,7 +125,9 @@ public:
                     << (payload ? " | Payload: " + payload.value() : "")
                     << std::endl;
 
-          if (results.code == "PING") {
+          if (results.code == "ALV?") {
+            send_message(Net::MsgStruct{"ALV!", null});
+          } else if (results.code == "PING") {
             ping_received = true;
           } else {
             msg_server.writer.wait_and_insert(
@@ -142,7 +144,7 @@ public:
     }
   }
 
-  auto send_message(const Net::MsgStruct& msg) -> void {
+  void send_message(const Net::MsgStruct& msg) {
     const auto& msg_str = msg.to_string();
 
     std::cout << "Sending -> Code: " << msg.code

@@ -280,7 +280,7 @@ private:
       const auto now = hr_clock::now();
       const auto diff = dur_cast<seconds>(now - last_ping);
 
-      if (diff.count() > 30) {
+      if (diff.count() > PING_TIMEOUT) {
         last_ping = now;
         for (i64 p_idx = players.size() - 1; p_idx >= 0; p_idx--) {
           if (!players[p_idx]->is_connected()) {
@@ -290,10 +290,10 @@ private:
           if (!players[p_idx]->get_ping()) {
             std::cout << "Player " << p_idx << " didn't send ping" << std::endl;
             players[p_idx]->disconnect();
+          } else {
+            players[p_idx]->clear_ping();
+            players[p_idx]->send_ping();
           }
-
-          players[p_idx]->clear_ping();
-          players[p_idx]->send_ping();
         }
       }
 

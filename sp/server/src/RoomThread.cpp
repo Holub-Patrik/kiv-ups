@@ -30,6 +30,9 @@ void Deck::reset() {
 
 } // namespace GameUtils
 
+constexpr usize TURN_TIMEOUT = 60;
+constexpr usize SD_OK_TIMEOUT = 30;
+
 static const Scoring scoring{};
 
 void PlayerSeat::reset_round() { round_bet = 0; }
@@ -218,7 +221,7 @@ void Room::room_logic() {
     const auto now = hr_clock::now();
     const auto diff = dur_cast<seconds>(now - last_ping);
 
-    if (diff.count() > 30) {
+    if (diff.count() > PING_TIMEOUT) {
       last_ping = now;
       for (auto& seat : ctx.seats) {
         if (seat.connection == nullptr) {
@@ -235,10 +238,10 @@ void Room::room_logic() {
                     << std::endl;
           seat.connection->disconnect();
           seat.connection = nullptr;
+        } else {
+          seat.connection->clear_ping();
+          seat.connection->send_ping();
         }
-
-        seat.connection->clear_ping();
-        seat.connection->send_ping();
       }
     }
 
@@ -577,6 +580,7 @@ void BettingState::start_next_turn(RoomContext& ctx) {
             << ctx.seats[ctx.current_actor].nickname << ")" << std::endl;
   ctx.broadcast(Msg::PTRN, Net::Serde::write_net_str(
                                ctx.seats[ctx.current_actor].nickname));
+  last_action_time = hr_clock::now();
 }
 
 void BettingState::requeue_others(RoomContext& ctx, int aggressor_idx) {
@@ -598,7 +602,26 @@ void BettingState::on_leave(Room& room, RoomContext& ctx) {
   std::cout << "State: Leave Betting" << std::endl;
 }
 
+static str ser_act(const PlayerSeat& seat) {
+  using namespace Net::Serde;
+  return write_net_str(seat.nickname) +
+         write_sm_int(static_cast<u8>(seat.action_taken)) +
+         write_var_int(seat.action_amount);
+}
+
 void BettingState::on_tick(Room& room, RoomContext& ctx) {
+  const auto now = hr_clock::now();
+  const auto diff = dur_cast<seconds>(now - last_action_time);
+
+  if (diff.count() > TURN_TIMEOUT) {
+    auto& seat = ctx.seats[ctx.current_actor];
+    seat.is_folded = true;
+    seat.action_taken = GameUtils::PlayerAction::Fold;
+
+    ctx.broadcast(Msg::TOUT, Net::Serde::write_net_str(seat.nickname));
+    start_next_turn(ctx);
+  }
+
   if (ctx.current_actor == -1) {
     if (ctx.round_phase == RoundPhase::River) {
       room.transition_to<ShowdownState>();
@@ -606,13 +629,6 @@ void BettingState::on_tick(Room& room, RoomContext& ctx) {
       room.transition_to<CommunityCardState>();
     }
   }
-}
-
-static str ser_act(const PlayerSeat& seat) {
-  using namespace Net::Serde;
-  return write_net_str(seat.nickname) +
-         write_sm_int(static_cast<u8>(seat.action_taken)) +
-         write_var_int(seat.action_amount);
 }
 
 opt<str> BettingState::check_bet_conditions(const PlayerSeat& seat,
@@ -751,6 +767,8 @@ void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
 
   ctx.broadcast(Msg::SDWN, payload);
   ctx.broadcast(Msg::GWIN, winner_payload);
+
+  sd_ok_timeout_start = hr_clock::now();
 }
 
 void ShowdownState::on_leave(Room& room, RoomContext& ctx) {}
@@ -764,6 +782,14 @@ void ShowdownState::on_tick(Room& room, RoomContext& ctx) {
   }
 
   if (count_players_accepted == ctx.count_active_players()) {
+    ctx.broadcast(Msg::GMDN, null);
+    room.transition_to<LobbyState>();
+  }
+
+  const auto now = hr_clock::now();
+  const auto diff = dur_cast<seconds>(now - sd_ok_timeout_start);
+
+  if (diff.count() > SD_OK_TIMEOUT) {
     ctx.broadcast(Msg::GMDN, null);
     room.transition_to<LobbyState>();
   }

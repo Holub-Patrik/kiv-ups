@@ -36,6 +36,7 @@ template <typename T> using time_point = std::chrono::time_point<T>;
 template <typename T> using uq_ptr = std::unique_ptr<T>;
 
 constexpr std::nullopt_t null = std::nullopt;
+constexpr usize PING_TIMEOUT = 60;
 
 using Result = struct res_info {
   bool connect = false;
@@ -128,6 +129,7 @@ cmp str_v ACOK = "ACOK"; // Server: Action OK
 cmp str_v ACFL = "ACFL"; // Server: Action failed
 cmp str_v NYET = "NYET"; // Server: Not your turn
 cmp str_v PACT = "PACT"; // Server: Player action (EBcast)
+cmp str_v TOUT = "TOUT"; // Server: Player action timedout
 
 // In-room responses (Client -> Room)
 cmp str_v CDOK = "CDOK";

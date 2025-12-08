@@ -129,9 +129,6 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	screen := w.NewGameScreen(10)
 	screenPanel := w.NewPanelComponent(rl.Color{R: 20, G: 80, B: 40, A: 255}, screen)
 
-	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.HighBet)
-	screen.SetPotDisplay(pot)
-
 	screen.ResetRiver()
 	for _, card := range ctx.State.Table.CommunityCards {
 		screen.AddRiverCard(buildCardComponent(card.Symbol, rl.RayWhite))
@@ -177,6 +174,9 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	}
 
 	myData, exists := ctx.State.Table.Players[ctx.State.Nickname]
+
+	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.HighBet, myData.ChipCount)
+	screen.SetPotDisplay(pot)
 
 	for _, card := range myData.Cards {
 		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))

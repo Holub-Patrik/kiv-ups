@@ -297,17 +297,16 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicS
 		case "RMST":
 			fmt.Println("DFA: Received Room State. Parsing...")
 
-			table, err := deserializeRoomState(evt.Msg.Payload, ctx.State.Reconnected)
+			ctx.StateMutex.Lock()
+			err := deserializeRoomState(ctx, evt.Msg.Payload)
+			ctx.StateMutex.Unlock()
+
 			if err != nil {
 				fmt.Printf("DFA: Failed to parse room state: %v\n", err)
 				ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "STFL"})
 				ctx.Popup.AddPopup("Failed to join room: invalid state", time.Second*3)
 				return &StateLobby{}
 			}
-
-			ctx.StateMutex.Lock()
-			ctx.State.Table = table
-			ctx.StateMutex.Unlock()
 
 			fmt.Println("DFA: Room State parsed. Sending STOK.")
 			ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "STOK"})
@@ -333,7 +332,16 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicS
 
 func (s *StateJoiningRoom) Exit(ctx *ProgCtx) {}
 
-type StateInGame struct{}
+type GameAction any
+type BetAction struct{ amount int }
+type CallAction struct{ amount int }
+type CheckAction struct{}
+type FoldAction struct{}
+type ReadyAction struct{}
+
+type StateInGame struct {
+	last_action GameAction
+}
 
 func (s *StateInGame) Enter(ctx *ProgCtx) {
 	ctx.StateMutex.Lock()
@@ -375,25 +383,21 @@ func (s *StateInGame) HandleInput(ctx *ProgCtx, input UserInputEvent) LogicState
 
 		ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: evt.Action, Payload: evt.Amount})
 
-		if evt.Action == "BETT" {
+		switch evt.Action {
+		case "BETT":
 			intAmount, _ := unet.ReadVarInt([]byte(evt.Amount))
-			ctx.State.Table.HighBet = int(intAmount)
-			ctx.State.Table.Pot += int(intAmount)
-		}
-
-		if evt.Action == "CALL" {
+			s.last_action = BetAction{int(intAmount)}
+		case "CALL":
 			myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
 			callAmount := min(myData.ChipCount, ctx.State.Table.HighBet)
-			ctx.State.Table.Pot += callAmount
-		}
-
-		if evt.Action == "RDY1" {
-			data, _ := ctx.State.Table.Players[ctx.State.Nickname]
-			data.IsReady = true
-			ctx.State.Table.Players[ctx.State.Nickname] = data
-		}
-
-		if evt.Action == "GMLV" {
+			s.last_action = CallAction{callAmount}
+		case "RDY1":
+			s.last_action = ReadyAction{}
+		case "CHCK":
+			s.last_action = CheckAction{}
+		case "FOLD":
+			s.last_action = FoldAction{}
+		case "GMLV":
 			return &StateLobby{}
 		}
 
@@ -488,7 +492,45 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 				ctx.Popup.AddPopup(fmt.Sprintf("Your turn! %t", data.IsMyTurn), 2*time.Second)
 			}
 
+		case "TOUT":
+			playerName, _ := unet.ReadString([]byte(evt.Msg.Payload))
+			if playerName == ctx.State.Nickname {
+				ctx.Popup.AddPopup("You timed out", time.Second*2)
+			} else {
+				ctx.Popup.AddPopup(fmt.Sprintf("%s Timed Out", playerName), time.Second*2)
+			}
+
+			data, _ := ctx.State.Table.Players[playerName]
+			data.IsMyTurn = false
+			data.IsFolded = true
+			ctx.State.Table.Players[playerName] = data
+
 		case "ACOK":
+			switch act := s.last_action.(type) {
+			case BetAction:
+				ctx.State.Table.HighBet = act.amount
+				ctx.State.Table.Pot += act.amount
+
+				data, _ := ctx.State.Table.Players[ctx.State.Nickname]
+				data.ChipCount -= act.amount
+				ctx.State.Table.Players[ctx.State.Nickname] = data
+
+			case CallAction:
+				ctx.State.Table.Pot += act.amount
+
+				data, _ := ctx.State.Table.Players[ctx.State.Nickname]
+				data.ChipCount -= act.amount
+				ctx.State.Table.Players[ctx.State.Nickname] = data
+
+			case ReadyAction:
+				data, _ := ctx.State.Table.Players[ctx.State.Nickname]
+				data.IsReady = true
+				ctx.State.Table.Players[ctx.State.Nickname] = data
+
+			case FoldAction:
+				// nothing I quess
+			}
+
 			fmt.Println("Action Accepted")
 			ctx.Popup.AddPopup("Action accepted", 1*time.Second)
 
@@ -758,11 +800,12 @@ func handleShowdown(ctx *ProgCtx, payload string) {
 	ctx.Popup.AddPopup("Showdown! Revealing cards...", 3*time.Second)
 }
 
-func deserializeRoomState(payload string, reconnected bool) (PokerTable, error) {
-	table := PokerTable{
-		CommunityCards: make([]Card, 0),
-		Players:        make(map[string]PlayerData),
+func deserializeRoomState(ctx *ProgCtx, payload string) error {
+	if ctx.State.Table.Players == nil {
+		ctx.State.Table.Players = make(map[string]PlayerData)
 	}
+
+	ctx.State.Table.CommunityCards = make([]Card, 0)
 
 	readTypes := []unet.ParseTypes{
 		unet.VarInt,
@@ -772,13 +815,13 @@ func deserializeRoomState(payload string, reconnected bool) (PokerTable, error) 
 
 	res, consumed, err := unet.ParseMessage(payload, readTypes)
 	if err != nil {
-		return table, errors.Join(err, fmt.Errorf("Error occured during 1st phase"))
+		return errors.Join(err, fmt.Errorf("Error occured during 1st phase"))
 	}
 
 	nextPayload := string([]byte(payload[consumed:]))
 
-	table.Pot = res[0].(int)
-	table.HighBet = res[1].(int)
+	ctx.State.Table.Pot = res[0].(int)
+	ctx.State.Table.HighBet = res[1].(int)
 	commCount := res[2].(int)
 
 	readCardTypes := make([]unet.ParseTypes, commCount+1)
@@ -788,14 +831,14 @@ func deserializeRoomState(payload string, reconnected bool) (PokerTable, error) 
 
 	res, consumed, err = unet.ParseMessage(nextPayload, readCardTypes)
 	if err != nil {
-		return table, errors.Join(err, fmt.Errorf("Error occured during reading CommunityCards and PlayerCount"))
+		return errors.Join(err, fmt.Errorf("Error occured during reading CommunityCards and PlayerCount"))
 	}
 
 	nextPayload = string([]byte(nextPayload[consumed:]))
 
 	for index := range commCount {
 		cardID := res[index].(int)
-		table.CommunityCards = append(table.CommunityCards, Card{
+		ctx.State.Table.CommunityCards = append(ctx.State.Table.CommunityCards, Card{
 			ID:     cardID,
 			Symbol: TranslateCardID(cardID),
 		})
@@ -818,7 +861,7 @@ func deserializeRoomState(payload string, reconnected bool) (PokerTable, error) 
 	for range playerCount {
 		res, consumed, err := unet.ParseMessage(nextPayload, readPlayerTypes)
 		if err != nil {
-			return table, errors.Join(err, fmt.Errorf("Error occured during reading player"))
+			return errors.Join(err, fmt.Errorf("Error occured during reading player"))
 		}
 
 		nextPayload = string([]byte(nextPayload[consumed:]))
@@ -837,7 +880,7 @@ func deserializeRoomState(payload string, reconnected bool) (PokerTable, error) 
 		pCards = append(pCards, Card{Hidden: true})
 		pCards = append(pCards, Card{Hidden: true})
 
-		table.Players[pNick] = PlayerData{
+		ctx.State.Table.Players[pNick] = PlayerData{
 			RoundBet:     pRoundBet,
 			TotalBet:     pTotalBet,
 			ChipCount:    pChips,
@@ -850,9 +893,9 @@ func deserializeRoomState(payload string, reconnected bool) (PokerTable, error) 
 		}
 	}
 
-	fmt.Println(table.Players)
+	fmt.Println(ctx.State.Table.Players)
 
-	return table, nil
+	return nil
 }
 
 func handleRoomData(ctx *ProgCtx, msg unet.NetMsg) error {
