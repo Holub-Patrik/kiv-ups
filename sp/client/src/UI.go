@@ -179,7 +179,11 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 	screen.SetPotDisplay(pot)
 
 	for _, card := range myData.Cards {
-		screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
+		if card.Hidden {
+			screen.AddPlayerCard(buildHiddenCardComponent())
+		} else {
+			screen.AddPlayerCard(buildCardComponent(card.Symbol, rl.Gold))
+		}
 	}
 
 	showActions := exists && myData.IsMyTurn && !myData.IsFolded

@@ -354,20 +354,6 @@ type StateInGame struct {
 func (s *StateInGame) Enter(ctx *ProgCtx) {
 	ctx.StateMutex.Lock()
 	ctx.State.Screen = ScreenInGame
-
-	// this field is set by main menu
-	data, _ := ctx.State.Table.Players[ctx.State.Nickname]
-	if data.Cards == nil {
-		data.Cards = make([]Card, 0)
-	}
-	data.IsMyTurn = data.IsMyTurn || false
-	data.IsReady = data.IsReady || false
-	data.IsFolded = data.IsFolded || false
-	if data.ActionTaken == "" {
-		data.ActionTaken = "NONE"
-	}
-	ctx.State.Table.Players[ctx.State.Nickname] = data
-
 	ctx.StateMutex.Unlock()
 	ctx.UI.SetDirty()
 }
@@ -419,7 +405,6 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 	case unet.NetMessage:
 		switch evt.Msg.Code {
 		case "PJIN":
-			// Player joined, update player list
 			handlePlayerJoined(ctx, evt.Msg.Payload)
 			ctx.Popup.AddPopup("A player has joined", 2*time.Second)
 
@@ -441,26 +426,28 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 			ctx.Popup.AddPopup("Game started!", 2*time.Second)
 
 		case "CDTP":
-			// Clear previous hand
 			myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
 			myData.Cards = make([]Card, 0)
 
-			pBytes := []byte(evt.Msg.Payload)
-			// Parse Card 1
-			val1, ok1 := unet.ReadSmallInt(pBytes)
-			if ok1 {
-				newCard := Card{ID: val1, Symbol: TranslateCardID(val1)}
-				myData.Cards = append(myData.Cards, newCard)
-
-				// Try Parse Card 2 (offset 2 bytes for SmallInt)
-				if len(pBytes) >= 4 {
-					val2, ok2 := unet.ReadSmallInt(pBytes[2:])
-					if ok2 {
-						newCard2 := Card{ID: val2, Symbol: TranslateCardID(val2)}
-						myData.Cards = append(myData.Cards, newCard2)
-					}
-				}
+			parseTypes := []unet.ParseTypes{
+				unet.SmallInt,
+				unet.SmallInt,
 			}
+
+			results, _, err := unet.ParseMessage(evt.Msg.Payload, parseTypes)
+			if err != nil {
+				ctx.Popup.AddPopup("Error during parsing, disconnecting", time.Second*3)
+				ctx.NetHandler.SendCommand(unet.NetDisconnect{})
+				return &StateMainMenu{}
+			}
+
+			c1 := results[0].(int)
+			c2 := results[1].(int)
+			myData.Cards = append(myData.Cards,
+				Card{ID: c1, Symbol: TranslateCardID(c1)},
+				Card{ID: c2, Symbol: TranslateCardID(c2)},
+			)
+
 			ctx.State.Table.Players[ctx.State.Nickname] = myData
 			ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "CDOK"})
 
@@ -529,7 +516,9 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 				ctx.State.Table.Players[ctx.State.Nickname] = data
 
 			case FoldAction:
-				// nothing I quess
+				data, _ := ctx.State.Table.Players[ctx.State.Nickname]
+				data.IsFolded = true
+				ctx.State.Table.Players[ctx.State.Nickname] = data
 			}
 
 			fmt.Println("Action Accepted")
@@ -569,15 +558,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 			ctx.State.Table.CommunityCards = nil
 			ctx.State.Showdown = false
 
-			myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
-			myData.Cards = nil
-			myData.IsMyTurn = false
-			myData.IsReady = false
-			myData.ActionTaken = "NONE"
-			myData.ActionAmount = 0
-
 			ctx.State.Table.RoundPhase = ""
-			ctx.State.Table.Players[ctx.State.Nickname] = myData
 			ctx.State.Table.Pot = 0
 			ctx.State.Table.HighBet = 0
 
@@ -588,9 +569,10 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 					pCards = append(pCards, Card{Hidden: true})
 					pCards = append(pCards, Card{Hidden: true})
 				}
-
 				player.IsReady = false
 				player.IsMyTurn = false
+				player.IsReady = false
+
 				player.Cards = pCards
 				player.RoundBet = 0
 				player.TotalBet = 0
