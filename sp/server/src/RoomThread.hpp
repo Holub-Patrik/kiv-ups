@@ -123,8 +123,8 @@ public:
   str name;
   RoomContext ctx;
 
-  Room(std::size_t id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
-       std::mutex& return_mutex);
+  Room(usize id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
+       std::mutex& return_mutex, usize p_count);
   ~Room();
 
   template <typename T, typename... Args> void transition_to(Args&&... args) {

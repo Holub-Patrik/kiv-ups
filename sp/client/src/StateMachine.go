@@ -108,6 +108,12 @@ func (s *StateConnecting) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicSt
 			fmt.Println("DFA: Nick accepted.")
 			return &StateSendingInfo{}
 
+		case "FULL":
+			fmt.Println("Server full")
+			ctx.Popup.AddPopup("Server full", time.Second*3)
+			ctx.NetHandler.SendCommand(unet.NetDisconnect{})
+			return &StateMainMenu{}
+
 		case "FAIL":
 			fmt.Println("DFA: Connection Failed (FAIL).")
 			ctx.NetHandler.SendCommand(unet.NetDisconnect{})

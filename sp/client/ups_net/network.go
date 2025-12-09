@@ -40,18 +40,16 @@ type NetDisconnect struct{}
 type NetShutdown struct{}
 
 type NetHandler struct {
-	// Connection state
-	conn     net.Conn
-	connMtx  sync.RWMutex
-	state    atomic.Value // stores ConnectionState
-	shutdown atomic.Bool
+	conn           net.Conn
+	connMtx        sync.RWMutex
+	userDisconnect atomic.Bool
+	state          atomic.Value
+	shutdown       atomic.Bool
 
-	// Channels
 	eventChan   chan NetEvent   // Network -> Game (events)
 	commandChan chan NetCommand // Game -> Network (commands)
 	msgOutChan  chan NetMsg     // Game -> Network (outgoing messages)
 
-	// Reconnection state
 	reconnectData struct {
 		sync.Mutex
 		host     string
@@ -61,7 +59,6 @@ type NetHandler struct {
 		timer    *time.Timer
 	}
 
-	// communication timeout handling
 	commMutex           sync.RWMutex
 	lastCommunication   time.Time
 	commTimer           *time.Timer
@@ -126,9 +123,11 @@ func (nh *NetHandler) Run() {
 func (nh *NetHandler) handleCommand(cmd NetCommand) {
 	switch c := cmd.(type) {
 	case NetConnect:
+		nh.userDisconnect.Store(false)
 		nh.handleConnect(c.Host, c.Port)
 
 	case NetDisconnect:
+		nh.userDisconnect.Store(true)
 		nh.handleDisconnect()
 
 	case NetShutdown:
@@ -142,6 +141,11 @@ func (nh *NetHandler) handleCommand(cmd NetCommand) {
 func (nh *NetHandler) handleConnect(host, port string) {
 	if nh.getState() != StateDisconnected {
 		fmt.Println("Already connected or connecting")
+		return
+	}
+
+	if nh.userDisconnect.Load() {
+		nh.state.Store(StateDisconnected)
 		return
 	}
 
@@ -188,6 +192,11 @@ func (nh *NetHandler) disconnectInternal() {
 func (nh *NetHandler) connectWithRetry(host, port string, isReconnect bool) {
 	if isReconnect {
 		nh.setState(StateReconnecting)
+	}
+
+	if nh.userDisconnect.Load() {
+		nh.state.Store(StateDisconnected)
+		return
 	}
 
 	for {
@@ -356,6 +365,11 @@ func (nh *NetHandler) processBuffer(buffer []byte, parser *Parser) {
 func (nh *NetHandler) handleConnectionLost() {
 	currentState := nh.getState()
 	if currentState != StateConnected {
+		return
+	}
+
+	if nh.userDisconnect.Load() {
+		nh.state.Store(StateDisconnected)
 		return
 	}
 

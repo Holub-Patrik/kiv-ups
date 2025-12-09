@@ -165,10 +165,10 @@ str RoomContext::serialize() const {
   return ss.str();
 }
 
-Room::Room(std::size_t id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
-           std::mutex& return_mutex)
+Room::Room(usize id, str name, vec<uq_ptr<PlayerInfo>>& return_vec,
+           std::mutex& return_mutex, usize p_count)
     : id(id), name(name), return_arr(return_vec), return_mtx(return_mutex),
-      ctx(4) {
+      ctx(p_count) {
   current_state = std::make_unique<LobbyState>();
   running = true;
   room_thread = std::thread(&Room::room_logic, this);

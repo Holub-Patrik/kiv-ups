@@ -1,0 +1,66 @@
+Main:
+	/* bunch of stuff */
+	vec<uq_ptr<Room>> rooms
+
+Room:
+	/* bunch of stuff */
+	Main* host
+
+LogicState:
+public:
+	virtual void on_enter() = 0
+	virtual opt<uq_ptr<LogicState>> on_msg() = 0
+	virtual opt<uq_ptr<LogicState>> on_tick() = 0
+	virtual void on_leave() = 0
+
+ConnectedState: public LogicState
+private:
+	MainRoom* ctx
+
+public:
+	override on_enter() {}
+	override on_msg() {}
+	override on_tick() {}
+	override on_leave() {}
+
+/*
+All other states would be implemented in a similar manner 
+*/
+
+PlayerInfo:
+	mutex handler_lock
+	uq_ptr<LogicState> state
+
+	handle_tick() {
+		scoped_lock l{handler_lock}
+		new_state = state->on_tick()
+		if (new_state) {
+			state->on_leave()
+			state = move(new_satte.val())
+			state->on_leave()
+		}
+	}
+
+	handle_msg(msg) {
+		scoped_lock l{handler_lock}
+		new_state = state->on_msg(msg)
+		if (new_state) {
+			state->on_leave()
+			state = move(new_state.val())
+			state->on_enter()
+		}
+	}
+
+	void acceptor_thread() {
+		while (running) {
+			vec<msg> msgs = parse_messages()
+			for (msg : msgs) {
+				handle_msg(msg)
+			}
+		}
+	}
+
+	void send_message(msg_struct) {}
+	vec<msg> parse_messages() {}
+
+

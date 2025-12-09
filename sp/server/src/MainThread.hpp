@@ -4,7 +4,6 @@
 #include "MessageSerde.hpp"
 #include "PlayerInfo.hpp"
 #include "RoomThread.hpp"
-#include "SockPool.hpp"
 #include "SockWrapper.hpp"
 
 #include <algorithm>
@@ -17,15 +16,29 @@
 
 using namespace std::chrono_literals;
 
+class ServerException final : public std::exception {
+private:
+  str msg;
+
+public:
+  ServerException(const char* msg) : msg(msg) {}
+  ServerException(const str& msg) : msg(msg) {}
+  ServerException(str&& msg) : msg(msg) {}
+
+  const char* what() const noexcept override { return msg.c_str(); }
+};
+
 class Server final {
 private:
+  usize max_players;
   vec<uq_ptr<PlayerInfo>> players;
   std::mutex player_mutex;
+  usize room_count;
+  usize room_player_count;
   vec<uq_ptr<Room>> rooms;
   std::atomic<bool> running = false;
   std::thread logic_thread;
   time_point<hr_clock> last_ping = hr_clock::now();
-  SockPool player_pool;
 
   void process_player_messages(PlayerInfo& player, Result& res) {
     for (usize i = 0; i < MSG_BATCH_SIZE; i++) {
@@ -334,16 +347,16 @@ private:
   }
 
 public:
-  Server() {
-    // Create some default rooms
-    rooms.emplace_back(
-        std::make_unique<Room>(1, "Room 1", players, player_mutex));
-    rooms.emplace_back(
-        std::make_unique<Room>(2, "Room 2", players, player_mutex));
-    rooms.emplace_back(
-        std::make_unique<Room>(3, "Room 3", players, player_mutex));
-    rooms.emplace_back(
-        std::make_unique<Room>(4, "Room 4", players, player_mutex));
+  Server() : max_players(2), room_count(1), room_player_count(2) {
+    if (max_players <= 0) {
+      throw ServerException{"Max players must be greater than 0"};
+    }
+
+    for (usize i = 0; i < room_count; i++) {
+      rooms.emplace_back(std::make_unique<Room>(i, "Room " + std::to_string(i),
+                                                players, player_mutex,
+                                                room_player_count));
+    }
   }
 
   ~Server() {
@@ -366,16 +379,14 @@ public:
         std::cout << "Waiting for new connection...\n";
         auto new_player = std::make_unique<PlayerInfo>(server_sock);
 
-        /* {
-          player_pool.accept_fd(new_player->sock.get_fd(),
-                                std::move(new_player));
-        } */
-        {
+        if (players.size() >= max_players) {
+          new_player->send_message(Net::MsgStruct{"FULL", null});
+          new_player->disconnect();
+        } else {
           std::scoped_lock lock(player_mutex);
           players.push_back(std::move(new_player));
+          std::cout << "New connection accepted and added to player list\n";
         }
-
-        std::cout << "New connection accepted and added to player list\n";
       } catch (const SocketException& e) {
         if (running) {
           std::cerr << "SocketException in accept loop: " << e.what()
