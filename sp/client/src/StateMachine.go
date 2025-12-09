@@ -72,7 +72,6 @@ type StateConnecting struct {
 
 func (s *StateConnecting) Enter(ctx *ProgCtx) {
 	fmt.Println("DFA: Entered Connecting State")
-	s.reconnecting = false
 	nickPayload, ok := unet.WriteString(ctx.State.Nickname)
 	if !ok {
 		ctx.NetHandler.SendCommand(unet.NetDisconnect{})
@@ -608,6 +607,7 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 		ctx.Popup.AddPopup("Server stopped responding, attempting reconnect.", time.Second*3)
 
 	case unet.NetReconnected:
+		fmt.Println("StateInGame: Reconnected passing true to state connecting to bypass question")
 		return &StateConnecting{true}
 
 	case unet.NetDisconnected:

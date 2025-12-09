@@ -114,6 +114,7 @@ func (nh *NetHandler) Run() {
 
 func (nh *NetHandler) checkAlive() {
 	if !nh.aliveReceived {
+		fmt.Println("Server didn't send ALV!")
 		nh.aliveMissed += 1
 	}
 

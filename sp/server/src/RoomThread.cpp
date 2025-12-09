@@ -325,6 +325,7 @@ void Room::process_incoming_players() {
       return_arr.push_back(std::move(p));
     }
   }
+
   incoming_queue.clear();
 }
 
