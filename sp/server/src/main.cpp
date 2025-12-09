@@ -64,7 +64,15 @@ auto main(int argc, char* argv[]) -> int {
   std::cout << "Parsed args" << std::endl;
   const auto parsed_args = maybe_parsed_args.value();
 
-  Server s{};
+  uq_ptr<Server> pa;
+  try {
+    pa = std::make_unique<Server>();
+  } catch (std::exception e) {
+    std::cout << e.what() << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  Server& s = *pa;
   s.run(parsed_args.port);
 
   return EXIT_SUCCESS;
