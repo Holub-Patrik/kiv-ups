@@ -326,7 +326,10 @@ func (s *StateJoiningRoom) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicS
 
 	case unet.NetReconnected:
 		ctx.Popup.AddPopup("Failed to join room", time.Second*3)
-		return &StateConnecting{false}
+		return &StateConnecting{true}
+
+	case unet.NetReconnecting:
+		ctx.Popup.AddPopup("Server stopped responding, attempting reconnect", time.Second*3)
 
 	case unet.NetDisconnected:
 		ctx.Popup.AddPopup("Server connection failed", time.Second*3)
@@ -352,13 +355,6 @@ type StateInGame struct {
 func (s *StateInGame) Enter(ctx *ProgCtx) {
 	ctx.StateMutex.Lock()
 	ctx.State.Screen = ScreenInGame
-	// Initialize table if not set by room state
-	if ctx.State.Table.Players == nil {
-		ctx.State.Table = PokerTable{
-			CommunityCards: make([]Card, 0),
-			Players:        make(map[string]PlayerData),
-		}
-	}
 
 	// this field is set by main menu
 	data, _ := ctx.State.Table.Players[ctx.State.Nickname]
@@ -607,6 +603,10 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 			ctx.Popup.AddPopup("Round ended. Starting new round...", time.Second*3)
 			ctx.NetHandler.SendNetMsg(unet.NetMsg{Code: "DNOK"})
 		}
+
+	case unet.NetReconnecting:
+		ctx.Popup.AddPopup("Server stopped responding, attempting reconnect.", time.Second*3)
+
 	case unet.NetReconnected:
 		return &StateConnecting{true}
 
@@ -618,7 +618,15 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 	return nil
 }
 
-func (s *StateInGame) Exit(ctx *ProgCtx) {}
+func (s *StateInGame) Exit(ctx *ProgCtx) {
+	myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
+	ctx.State.Table.Players = nil
+	ctx.State.Table.CommunityCards = nil
+	ctx.State.Table.HighBet = 0
+	ctx.State.Table.Pot = 0
+	ctx.State.Table.Players = make(map[string]PlayerData)
+	ctx.State.Table.Players[ctx.State.Nickname] = myData
+}
 
 func validateGameAction(ctx *ProgCtx, action string, amount string) bool {
 	table := &ctx.State.Table

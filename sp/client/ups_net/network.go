@@ -117,7 +117,7 @@ func (nh *NetHandler) checkAlive() {
 		nh.aliveMissed += 1
 	}
 
-	if nh.aliveMissed > 3 {
+	if nh.aliveMissed >= 2 {
 		nh.handleConnectionLost()
 	}
 }

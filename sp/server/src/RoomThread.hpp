@@ -118,6 +118,8 @@ private:
 
   time_point<hr_clock> last_ping = hr_clock::now();
 
+  void player_leave(usize seat);
+
 public:
   usize id;
   str name;

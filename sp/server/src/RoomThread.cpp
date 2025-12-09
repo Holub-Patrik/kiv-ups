@@ -224,13 +224,15 @@ void Room::room_logic() {
 
     if (diff.count() > PING_TIMEOUT) {
       last_ping = now;
-      for (auto& seat : ctx.seats) {
+      for (usize seat_idx = 0; seat_idx < ctx.seats.size(); seat_idx++) {
+        auto& seat = ctx.seats[seat_idx];
         if (seat.connection == nullptr) {
           continue;
         }
 
         if (!seat.connection->is_connected()) {
           seat.connection = nullptr;
+          player_leave(seat_idx);
           continue;
         }
 
@@ -239,6 +241,7 @@ void Room::room_logic() {
                     << std::endl;
           seat.connection->disconnect();
           seat.connection = nullptr;
+          player_leave(seat_idx);
         } else {
           seat.connection->clear_ping();
           seat.connection->send_ping();
@@ -334,6 +337,32 @@ static bool is_valid_room_code(const str_v& code) {
          valid_codes.end();
 }
 
+void Room::player_leave(usize seat_idx) {
+  auto& seat = ctx.seats[seat_idx];
+  auto& p = seat.connection;
+  seat.action_taken = GameUtils::PlayerAction::Left;
+  const auto act_str =
+      Net::Serde::write_net_str(seat.nickname) +
+      Net::Serde::write_sm_int(static_cast<u8>(seat.action_taken)) +
+      Net::Serde::write_var_int(seat.action_amount);
+
+  if (p != nullptr) {
+    std::lock_guard lg{return_mtx};
+    p->state = PlayerState::AwaitingJoin;
+    return_arr.emplace_back(std::move(p));
+    std::cout << "Player Moved back to Main Thread" << std::endl;
+  }
+
+  seat.connection = nullptr;
+  if (current_state->get_name() == "Lobby") {
+    seat.is_occupied = false;
+    seat.is_ready = false;
+    seat.nickname = "";
+  }
+
+  ctx.broadcast_ex(seat_idx, Msg::PACT, act_str);
+}
+
 void Room::process_network_io() {
   for (int i = 0; i < ctx.seats.size(); ++i) {
     auto& seat = ctx.seats[i];
@@ -363,28 +392,7 @@ void Room::process_network_io() {
         if (msg.code == Msg::GMLV) {
           std::cout << "Player " << seat.nickname << " leaving room"
                     << std::endl;
-
-          seat.action_taken = GameUtils::PlayerAction::Left;
-          const auto act_str =
-              Net::Serde::write_net_str(seat.nickname) +
-              Net::Serde::write_sm_int(static_cast<u8>(seat.action_taken)) +
-              Net::Serde::write_var_int(seat.action_amount);
-
-          {
-            std::lock_guard lg{return_mtx};
-            p->state = PlayerState::AwaitingJoin;
-            return_arr.emplace_back(std::move(p));
-            std::cout << "Player Moved back to Main Thread" << std::endl;
-          }
-
-          seat.connection = nullptr;
-          if (current_state->get_name() == "Lobby") {
-            seat.is_occupied = false;
-            seat.is_ready = false;
-            seat.nickname = "";
-          }
-          ctx.broadcast_ex(i, Msg::PACT, act_str);
-
+          player_leave(i);
           break;
         }
 
