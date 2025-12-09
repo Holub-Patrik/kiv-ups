@@ -58,7 +58,7 @@ func (s *StateMainMenu) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicStat
 		ctx.StateMutex.Lock()
 		ctx.State.Screen = ScreenConnecting
 		ctx.StateMutex.Unlock()
-		return &StateConnecting{}
+		return &StateConnecting{false}
 	}
 
 	return nil
