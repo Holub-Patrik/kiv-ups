@@ -669,7 +669,6 @@ func validateGameAction(ctx *ProgCtx, action string, amount string) bool {
 }
 
 func handlePlayerJoined(ctx *ProgCtx, payload string) {
-	// Parse PJIN payload: player nickname
 	types := []unet.ParseTypes{
 		unet.String,
 		unet.VarInt,
@@ -760,14 +759,14 @@ func handlePlayerAction(ctx *ProgCtx, payload string) {
 		ctx.Popup.AddPopup(fmt.Sprintf("%s checked", pNick), 2*time.Second)
 	case "LEFT":
 		ctx.Popup.AddPopup(fmt.Sprintf("%s left", pNick), 2*time.Second)
+		delete(ctx.State.Table.Players, pNick)
+		return
 	}
 
 	ctx.State.Table.Players[pNick] = player
 }
 
 func handleShowdown(ctx *ProgCtx, payload string) {
-	// Parse SDWN payload: series of cards and player info
-	// For simplicity, just show a popup
 	pCount, _ := unet.ReadSmallInt([]byte(payload))
 	parseTypes := []unet.ParseTypes{
 		unet.String,

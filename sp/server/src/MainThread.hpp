@@ -128,6 +128,8 @@ private:
           if (mb_room) {
             res.connect = true;
             res.room_idx = mb_room.value();
+          } else {
+            res.connect = false;
           }
           return;
         } else if (msg.code == Msg::RMRQ) {
@@ -254,7 +256,7 @@ private:
     for (usize i = 0; i < rooms.size(); i++) {
       const auto& room = *rooms[i];
       if (room.id == req_id) {
-        if (!room.can_player_join()) {
+        if (!room.can_player_join(player.nickname)) {
           std::cerr << "Room " << req_id << " full, rejecting "
                     << player.nickname << std::endl;
           player.send_message({str{Msg::JNFL}, null});

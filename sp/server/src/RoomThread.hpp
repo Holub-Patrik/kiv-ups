@@ -75,6 +75,7 @@ struct RoomContext {
   int current_high_bet = 0;
   int dealer_idx = 0;
   int current_actor = -1;
+  bool room_locked = false;
   RoundPhase round_phase = RoundPhase::PreFlop;
 
   RoomContext() = delete;
@@ -115,7 +116,6 @@ private:
   uq_ptr<RoomState> next_state_ptr;
   bool pending_transition = false;
 
-  bool room_locked = false;
   time_point<hr_clock> last_ping = hr_clock::now();
 
 public:

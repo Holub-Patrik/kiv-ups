@@ -200,7 +200,11 @@ str Room::serialize() const {
 }
 
 bool Room::can_player_join(const str& p_name) const {
-  if (room_locked) {
+  if (p_name == "" && ctx.room_locked) {
+    return false;
+  }
+
+  if (ctx.room_locked) {
     for (const auto& p : ctx.seats) {
       if (p.nickname == p_name) {
         return true;
@@ -367,7 +371,7 @@ void Room::process_network_io() {
           const auto act_str =
               Net::Serde::write_net_str(seat.nickname) +
               Net::Serde::write_sm_int(static_cast<u8>(seat.action_taken)) +
-              Net::Serde::write_sm_int(seat.action_amount);
+              Net::Serde::write_var_int(seat.action_amount);
 
           {
             std::lock_guard lg{return_mtx};
@@ -412,9 +416,11 @@ void LobbyState::on_enter(Room& room, RoomContext& ctx) {
   ctx.pot = 0;
   ctx.community_cards.clear();
   ctx.deck.reset();
+  ctx.room_locked = false;
 }
 
 void LobbyState::on_leave(Room& room, RoomContext& ctx) {
+  ctx.room_locked = true;
   std::cout << "State: Leave Lobby" << std::endl;
 }
 
