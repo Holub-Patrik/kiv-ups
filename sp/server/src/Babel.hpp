@@ -36,7 +36,16 @@ template <typename T> using time_point = std::chrono::time_point<T>;
 template <typename T> using uq_ptr = std::unique_ptr<T>;
 
 constexpr std::nullopt_t null = std::nullopt;
+
+#ifdef DEBUG
+constexpr usize TURN_TIMEOUT = 60;
+constexpr usize SD_OK_TIMEOUT = 30;
 constexpr usize PING_TIMEOUT = 60;
+#else
+constexpr usize TURN_TIMEOUT = 30;
+constexpr usize SD_OK_TIMEOUT = 15;
+constexpr usize PING_TIMEOUT = 10;
+#endif
 
 using Result = struct res_info {
   bool connect = false;

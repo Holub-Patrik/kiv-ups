@@ -30,9 +30,6 @@ void Deck::reset() {
 
 } // namespace GameUtils
 
-constexpr usize TURN_TIMEOUT = 60;
-constexpr usize SD_OK_TIMEOUT = 30;
-
 static const Scoring scoring{};
 
 void PlayerSeat::reset_round() { round_bet = 0; }

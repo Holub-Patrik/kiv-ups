@@ -347,7 +347,7 @@ private:
   }
 
 public:
-  Server() : max_players(2), room_count(1), room_player_count(2) {
+  Server() : max_players(16), room_count(4), room_player_count(4) {
     if (max_players <= 0) {
       throw ServerException{"Max players must be greater than 0"};
     }
