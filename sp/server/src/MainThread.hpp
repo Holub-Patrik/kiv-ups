@@ -366,13 +366,9 @@ public:
     }
   }
 
-  auto run(std::uint16_t port) -> void {
-    std::cout << "Server starting on port " << port << std::endl;
-
+  void run(const ServerSocket& server_sock) {
     running = true;
     logic_thread = std::thread{&Server::process_logic, this};
-
-    ServerSocket server_sock(port);
 
     while (running) {
       try {

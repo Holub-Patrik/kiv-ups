@@ -7,6 +7,7 @@
 #include <string>
 
 extern "C" {
+#include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -78,7 +79,7 @@ public:
     return *this;
   }
 
-  explicit ServerSocket(u16 port, u32 ip = INADDR_ANY) {
+  explicit ServerSocket(u16 port, const str& ip = "ANY") {
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd <= 0) {
       throw SocketException(SocketExceptionType::SOCK);
@@ -87,7 +88,11 @@ public:
     memset(&addr, 0, sizeof(struct sockaddr_in));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = ip;
+    if (ip == "ANY") {
+      addr.sin_addr.s_addr = INADDR_ANY;
+    } else {
+      addr.sin_addr.s_addr = inet_addr(ip.c_str());
+    }
 
     int param = 1;
     const auto setsockopt_ret = setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR,

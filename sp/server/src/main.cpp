@@ -18,13 +18,14 @@ extern "C" {
 
 #include "Babel.hpp"
 #include "MainThread.hpp"
+#include "SockWrapper.hpp"
 
 constexpr long max_port = 65535;
 constexpr unsigned long max_ip_part = 255;
 
 struct usr_args {
   u16 port;
-  u32 ip;
+  str ip;
 };
 
 opt<usr_args> parse_args(vec<str> args) {
@@ -33,7 +34,7 @@ opt<usr_args> parse_args(vec<str> args) {
 
   try {
     usr_port = std::stoul(args[0]);
-  } catch (std::exception e) {
+  } catch (const std::exception& e) {
     std::cout << "Parsing error: " << e.what() << std::endl;
     return null;
   }
@@ -45,50 +46,43 @@ opt<usr_args> parse_args(vec<str> args) {
     ret.port = port;
   }
 
-  auto ip_str_s = std::stringstream{args[1]};
-  vec<str> parts{};
-  parts.reserve(4);
-  char del = '.';
-  for (str part; std::getline(ip_str_s, part, '.');) {
-    parts.push_back(part);
-  }
-
-  if (parts.size() != 4) {
-    return null;
-  }
-
-  arr<u8, 4> ip_num_parts;
-  usize index = 0;
-  for (const auto& part : parts) {
-    unsigned long ip_part;
-    try {
-      ip_part = std::stoul(part);
-    } catch (std::exception e) {
-      std::cout << "Parsing error: " << e.what() << std::endl;
+  if (args.size() >= 2) {
+    auto ip_str_s = std::stringstream{args[1]};
+    vec<str> parts{};
+    parts.reserve(4);
+    char del = '.';
+    for (str part; std::getline(ip_str_s, part, '.');) {
+      parts.push_back(part);
     }
 
-    if (ip_part > max_ip_part) {
-      std::cout << "Individual ip parts must be from range <0;255>"
-                << std::endl;
+    if (parts.size() != 4) {
       return null;
     }
 
-    ip_num_parts[index] = scast<u8>(ip_part);
-    index++;
-  }
+    for (const auto& part : parts) {
+      unsigned long ip_part;
+      try {
+        ip_part = std::stoul(part);
+      } catch (const std::exception& e) {
+        std::cout << "Parsing error: " << e.what() << std::endl;
+      }
 
-  u32 ip = 0;
-  ip |= ip_num_parts[0] << 24;
-  ip |= ip_num_parts[1] << 16;
-  ip |= ip_num_parts[2] << 8;
-  ip |= ip_num_parts[3];
-  ret.ip = ip;
+      if (ip_part > max_ip_part) {
+        std::cout << "Individual ip parts must be from range <0;255>"
+                  << std::endl;
+        return null;
+      }
+    }
+    ret.ip = args[1];
+  } else {
+    ret.ip = "ANY";
+  }
 
   return ret;
 }
 
 auto main(int argc, char* argv[]) -> int {
-  if (argc <= 2) {
+  if (argc <= 1) {
     std::cout << "Not enough arguments." << std::endl;
     return EXIT_FAILURE;
   }
@@ -104,19 +98,27 @@ auto main(int argc, char* argv[]) -> int {
     return -1;
   }
 
-  std::cout << "Parsed args" << std::endl;
   const auto parsed_args = maybe_parsed_args.value();
+  std::cout << "Parsed args: " << parsed_args.ip << " " << parsed_args.port
+            << std::endl;
 
+  uq_ptr<ServerSocket> ps;
   uq_ptr<Server> pa;
   try {
+    std::cout << "Opening socket..." << std::endl;
+    ps = std::make_unique<ServerSocket>(parsed_args.port, parsed_args.ip);
+    std::cout << "Socket opened" << std::endl;
+    std::cout << "Creating server..." << std::endl;
     pa = std::make_unique<Server>();
-  } catch (std::exception e) {
+    std::cout << "Server created" << std::endl;
+  } catch (const std::exception& e) {
     std::cout << e.what() << std::endl;
     return EXIT_FAILURE;
   }
 
+  const ServerSocket& sock = *ps;
   Server& s = *pa;
-  s.run(parsed_args.port);
+  s.run(sock);
 
   return EXIT_SUCCESS;
 }
