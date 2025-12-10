@@ -16,6 +16,8 @@ extern "C" {
 #include <unistd.h>
 }
 
+#include "Babel.hpp"
+
 enum class SocketExceptionType { SOCK, SETSOCKOPT, BIND, LISTEN, ACCEPT };
 
 class SocketException : public std::exception {
@@ -76,7 +78,7 @@ public:
     return *this;
   }
 
-  explicit ServerSocket(std::uint16_t port) {
+  explicit ServerSocket(u16 port, u32 ip = INADDR_ANY) {
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd <= 0) {
       throw SocketException(SocketExceptionType::SOCK);
@@ -85,7 +87,7 @@ public:
     memset(&addr, 0, sizeof(struct sockaddr_in));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = ip;
 
     int param = 1;
     const auto setsockopt_ret = setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR,
