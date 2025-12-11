@@ -151,6 +151,7 @@ cmp str_v SDFL = "SDFL"; // Client: Showdown fail
 
 // Win (Server -> Client)
 cmp str_v GWIN = "GWIN"; // Server: Win with winner's nick
+cmp str_v GLOS = "GLOS"; // Server: Eveyone lost (all folded)
 cmp str_v GWOK = "GWOK"; // Client: Win OK
 cmp str_v GWFL = "GWFL"; // Client: Win fail
 

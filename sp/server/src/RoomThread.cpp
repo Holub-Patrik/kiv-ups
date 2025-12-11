@@ -38,13 +38,19 @@ void PlayerSeat::reset_game() {
   is_folded = false;
   is_ready = false;
   showdowm_okay = false;
+  cards_dealt = false;
+  hand.first = 0;
+  hand.second = 0;
   round_bet = 0;
   total_bet = 0;
-  hand.clear();
 }
 
 bool PlayerSeat::is_active() const {
-  return is_occupied && connection != nullptr && connection->is_connected();
+  if (connection == nullptr) {
+    return false;
+  }
+
+  return is_occupied && connection->is_connected();
 }
 
 RoomContext::RoomContext(int p_count) { seats.resize(p_count); }
@@ -139,12 +145,15 @@ static str ser_player(const int& seat_idx, const RoomContext& ctx) {
   return net_msg.str();
 }
 
-str RoomContext::serialize() const {
+str RoomContext::serialize(usize seat_idx) const {
   using namespace Net::Serde;
   std::stringstream ss{};
 
   ss << write_var_int(pot);
   ss << write_var_int(current_high_bet);
+  ss << write_sm_int(seats[seat_idx].cards_dealt ? 1 : 0);
+  ss << write_sm_int(seats[seat_idx].hand.first);
+  ss << write_sm_int(seats[seat_idx].hand.second);
   ss << write_sm_int(community_cards.size());
 
   for (const auto& card : community_cards) {
@@ -286,10 +295,8 @@ void Room::process_incoming_players() {
         seat.connection->state = PlayerState::InRoom;
         seated = true;
 
-        // In this case chips have to be sent back to player
-        // No argument means that the player themselves will be included in the
-        // message
-        seat.connection->send_message(Net::MsgStruct{"RMST", ctx.serialize()});
+        seat.connection->send_message(
+            Net::MsgStruct{"RMST", ctx.serialize(seat_idx)});
         ctx.broadcast_ex(seat_idx, Msg::PJIN, ser_player(seat_idx, ctx));
         break;
       }
@@ -303,16 +310,16 @@ void Room::process_incoming_players() {
           seat.chips = p->chips;
           seat.connection = std::move(p);
           seat.connection->state = PlayerState::InRoom;
+          seat.is_occupied = true;
+
           seated = true;
 
           seat.connection->send_message(
-              Net::MsgStruct{"RMST", ctx.serialize()});
+              Net::MsgStruct{"RMST", ctx.serialize(i)});
 
           ctx.broadcast_ex(i, Msg::PJIN, ser_player(i, ctx));
           std::cout << "New player " << ctx.seats[i].nickname << " at seat "
                     << i << " | " << seat.chips << std::endl;
-
-          seat.is_occupied = true;
           break;
         }
       }
@@ -368,39 +375,46 @@ void Room::process_network_io() {
   for (int i = 0; i < ctx.seats.size(); ++i) {
     auto& seat = ctx.seats[i];
 
-    if (seat.is_occupied && seat.connection &&
-        !seat.connection->is_connected()) {
+    if (!seat.is_occupied || seat.connection == nullptr) {
+      continue;
+    }
+
+    if (!seat.connection->is_connected()) {
       std::cout << "Player " << seat.nickname << " diconnected (seat " << i
                 << ")" << std::endl;
       seat.connection = nullptr;
       continue;
     }
 
-    if (seat.is_active()) {
-      auto& p = seat.connection;
-      while (const auto& msg_opt = p->msg_client.reader.read()) {
-        const auto& msg = msg_opt.value();
+    auto& p = seat.connection;
+    while (true) {
+      const auto& msg_opt = p->reader.read();
+      if (!msg_opt) {
+        break;
+      } else {
+        std::cout << "Processing: " << msg_opt.value().code
+                  << " For: " << p->nickname << std::endl;
+      }
+      const auto& msg = msg_opt.value();
 
-        // Validate message code
-        if (!is_valid_room_code(msg.code)) {
-          std::cerr << "Unknown room message " << msg.code << " from "
-                    << seat.nickname << ", disconnecting" << std::endl;
-          p->disconnect();
-          break;
-        }
+      // Validate message code
+      if (!is_valid_room_code(msg.code)) {
+        std::cerr << "Unknown room message " << msg.code << " from "
+                  << seat.nickname << ", disconnecting" << std::endl;
+        p->disconnect();
+        break;
+      }
 
-        // Global leave command
-        if (msg.code == Msg::GMLV) {
-          std::cout << "Player " << seat.nickname << " leaving room"
-                    << std::endl;
-          player_leave(i);
-          break;
-        }
+      // Global leave command
+      if (msg.code == Msg::GMLV) {
+        std::cout << "Player " << seat.nickname << " leaving room" << std::endl;
+        player_leave(i);
+        break;
+      }
 
-        // Route to current state
-        if (current_state) {
-          current_state->on_message(*this, ctx, i, msg);
-        }
+      // Route to current state
+      if (current_state) {
+        current_state->on_message(*this, ctx, i, msg);
       }
     }
   }
@@ -458,11 +472,13 @@ void LobbyState::on_tick(Room& room, RoomContext& ctx) {
 
 void LobbyState::on_message(Room& room, RoomContext& ctx, int seat_idx,
                             const Net::MsgStruct& msg) {
+  std::cout << "Msg: " << msg.code << std::endl;
   if (msg.code == Msg::RDY1) {
     if (ctx.seats[seat_idx].is_active()) {
       ctx.seats[seat_idx].is_ready = true;
-      ctx.broadcast(Msg::PRDY,
-                    Net::Serde::write_net_str(ctx.seats[seat_idx].nickname));
+      ctx.send_to(seat_idx, Msg::ACOK, null);
+      ctx.broadcast_ex(seat_idx, Msg::PRDY,
+                       Net::Serde::write_net_str(ctx.seats[seat_idx].nickname));
       std::cout << "Player " << ctx.seats[seat_idx].nickname << " ready"
                 << std::endl;
     }
@@ -480,6 +496,7 @@ void DealingState::on_enter(Room& room, RoomContext& ctx) {
       u8 c1 = ctx.deck.draw();
       u8 c2 = ctx.deck.draw();
       ctx.seats[i].hand = {c1, c2};
+      ctx.seats[i].cards_dealt = true;
       const auto& card_str =
           Net::Serde::write_sm_int(c1) + Net::Serde::write_sm_int(c2);
       ctx.send_to(i, Msg::CDTP, card_str);
@@ -622,6 +639,16 @@ static str ser_act(const PlayerSeat& seat) {
 }
 
 void BettingState::on_tick(Room& room, RoomContext& ctx) {
+  if (ctx.current_actor == -1) {
+    if (ctx.round_phase == RoundPhase::River) {
+      room.transition_to<ShowdownState>();
+    } else {
+      room.transition_to<CommunityCardState>();
+    }
+
+    return;
+  }
+
   const auto now = hr_clock::now();
   const auto diff = dur_cast<seconds>(now - last_action_time);
 
@@ -632,14 +659,6 @@ void BettingState::on_tick(Room& room, RoomContext& ctx) {
 
     ctx.broadcast(Msg::TOUT, Net::Serde::write_net_str(seat.nickname));
     start_next_turn(ctx);
-  }
-
-  if (ctx.current_actor == -1) {
-    if (ctx.round_phase == RoundPhase::River) {
-      room.transition_to<ShowdownState>();
-    } else {
-      room.transition_to<CommunityCardState>();
-    }
   }
 }
 
@@ -746,38 +765,58 @@ void BettingState::on_message(Room& room, RoomContext& ctx, int seat_idx,
 void ShowdownState::on_enter(Room& room, RoomContext& ctx) {
   std::cout << "State: Enter Showdown" << std::endl;
 
-  str payload = Net::Serde::write_sm_int(ctx.count_occupied_seats());
-
   PokerScore highest_score{};
   str winner{};
+
+  std::stringstream cards_payload{};
+  cards_payload << Net::Serde::write_sm_int(ctx.count_occupied_seats());
+  for (const auto& seat : ctx.seats) {
+    using namespace Net::Serde;
+    cards_payload << write_net_str(seat.nickname);
+    cards_payload << write_sm_int(seat.hand.first);
+    cards_payload << write_sm_int(seat.hand.second);
+  }
+
+  ctx.broadcast(Msg::SDWN, cards_payload.str());
+
+  bool all_folded = true;
+  for (const auto& seat : ctx.seats) {
+    if (seat.is_occupied && !seat.is_folded) {
+      all_folded = false;
+      break;
+    }
+  }
+
+  if (all_folded) {
+    ctx.broadcast(Msg::GLOS, null);
+    sd_ok_timeout_start = hr_clock::now();
+    return;
+  }
 
   for (int i = 0; i < ctx.seats.size(); ++i) {
     const auto& seat = ctx.seats[i];
     if (seat.is_occupied) {
-      const arr<u8, 2> hand{seat.hand[0], seat.hand[1]};
+      const arr<u8, 2> hand{seat.hand.first, seat.hand.second};
       const arr<u8, 5> river{
           ctx.community_cards[0], ctx.community_cards[1],
           ctx.community_cards[2], ctx.community_cards[3],
           ctx.community_cards[4],
       };
 
-      const auto score =
-          scoring.evaluate_poker_hand(std::move(hand), std::move(river));
-      if (score > highest_score) {
-        highest_score = std::move(score);
-        winner = seat.nickname;
+      if (!seat.is_folded) {
+        const auto score =
+            scoring.evaluate_poker_hand(std::move(hand), std::move(river));
+        if (score > highest_score) {
+          highest_score = std::move(score);
+          winner = seat.nickname;
+        }
       }
-
-      payload += Net::Serde::write_net_str(seat.nickname);
-      payload += Net::Serde::write_sm_int(seat.hand[0]);
-      payload += Net::Serde::write_sm_int(seat.hand[1]);
     }
   }
 
   const str winner_payload =
       Net::Serde::write_net_str(winner) + Net::Serde::write_var_int(ctx.pot);
 
-  ctx.broadcast(Msg::SDWN, payload);
   ctx.broadcast(Msg::GWIN, winner_payload);
 
   sd_ok_timeout_start = hr_clock::now();

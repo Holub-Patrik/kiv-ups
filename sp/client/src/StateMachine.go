@@ -470,14 +470,15 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 
 		case "PTRN":
 			playerName, _ := unet.ReadString([]byte(evt.Msg.Payload))
-			for name, player := range ctx.State.Table.Players {
-				player.IsMyTurn = (name == playerName)
-				ctx.State.Table.Players[name] = player
+
+			for name, data := range ctx.State.Table.Players {
+				data.IsMyTurn = (name == playerName)
+				ctx.State.Table.Players[name] = data
 			}
 
 			if playerName == ctx.State.Nickname {
 				data, _ := ctx.State.Table.Players[playerName]
-				ctx.Popup.AddPopup(fmt.Sprintf("Your turn! %t", data.IsMyTurn), 2*time.Second)
+				ctx.Popup.AddPopup(fmt.Sprintf("Your turn! [ %t | %t ]", data.IsMyTurn, data.IsFolded), time.Second*5)
 			}
 
 		case "TOUT":
@@ -538,6 +539,9 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 		case "SDWN":
 			handleShowdown(ctx, evt.Msg.Payload)
 
+		case "GLOS":
+			ctx.Popup.AddPopup("Everyone lost. Casino Won.", time.Second*3)
+
 		case "GWIN":
 			parseTypes := []unet.ParseTypes{unet.String, unet.VarInt}
 			res, _, err := unet.ParseMessage(evt.Msg.Payload, parseTypes)
@@ -569,9 +573,10 @@ func (s *StateInGame) HandleNetwork(ctx *ProgCtx, msg unet.NetEvent) LogicState 
 					pCards = append(pCards, Card{Hidden: true})
 					pCards = append(pCards, Card{Hidden: true})
 				}
+
 				player.IsReady = false
 				player.IsMyTurn = false
-				player.IsReady = false
+				player.IsFolded = false
 
 				player.Cards = pCards
 				player.RoundBet = 0
@@ -806,6 +811,9 @@ func deserializeRoomState(ctx *ProgCtx, payload string) error {
 		unet.VarInt,
 		unet.VarInt,
 		unet.SmallInt,
+		unet.SmallInt,
+		unet.SmallInt,
+		unet.SmallInt,
 	}
 
 	res, consumed, err := unet.ParseMessage(payload, readTypes)
@@ -817,7 +825,10 @@ func deserializeRoomState(ctx *ProgCtx, payload string) error {
 
 	ctx.State.Table.Pot = res[0].(int)
 	ctx.State.Table.HighBet = res[1].(int)
-	commCount := res[2].(int)
+	cardsDealt := res[2].(int) == 1
+	card1 := res[3].(int)
+	card2 := res[4].(int)
+	commCount := res[5].(int)
 
 	readCardTypes := make([]unet.ParseTypes, commCount+1)
 	for i := range readCardTypes {
@@ -875,7 +886,7 @@ func deserializeRoomState(ctx *ProgCtx, payload string) error {
 		pCards = append(pCards, Card{Hidden: true})
 		pCards = append(pCards, Card{Hidden: true})
 
-		ctx.State.Table.Players[pNick] = PlayerData{
+		pData := PlayerData{
 			RoundBet:     pRoundBet,
 			TotalBet:     pTotalBet,
 			ChipCount:    pChips,
@@ -886,6 +897,13 @@ func deserializeRoomState(ctx *ProgCtx, payload string) error {
 			ActionAmount: pActionAmount,
 			Cards:        pCards,
 		}
+
+		if pNick == ctx.State.Nickname && cardsDealt {
+			pData.Cards[0] = Card{ID: card1, Symbol: TranslateCardID(card1), Hidden: false}
+			pData.Cards[1] = Card{ID: card2, Symbol: TranslateCardID(card2), Hidden: false}
+		}
+
+		ctx.State.Table.Players[pNick] = pData
 	}
 
 	fmt.Println(ctx.State.Table.Players)

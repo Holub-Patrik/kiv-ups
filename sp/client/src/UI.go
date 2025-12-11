@@ -173,7 +173,7 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 		screen.AddOtherPlayer(info)
 	}
 
-	myData, exists := ctx.State.Table.Players[ctx.State.Nickname]
+	myData, _ := ctx.State.Table.Players[ctx.State.Nickname]
 
 	pot := w.NewPotDisplayComponent(ctx.State.Table.Pot, ctx.State.Table.HighBet, myData.ChipCount)
 	screen.SetPotDisplay(pot)
@@ -186,7 +186,7 @@ func buildGameScreen(ctx *ProgCtx) UIElement {
 		}
 	}
 
-	showActions := exists && myData.IsMyTurn && !myData.IsFolded
+	showActions := myData.IsMyTurn && !myData.IsFolded
 
 	if !myData.IsReady {
 		readyBtn := w.NewButtonComponent("Game_Ready", "Ready", 100, 50)

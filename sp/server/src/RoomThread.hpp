@@ -56,8 +56,9 @@ struct PlayerSeat {
   bool is_folded = false;
   bool is_ready = false;
   bool showdowm_okay = false;
+  bool cards_dealt = false;
 
-  vec<u8> hand;
+  pair<u8, u8> hand;
   GameUtils::PlayerAction action_taken = GameUtils::PlayerAction::None;
   usize action_amount = 0;
   uq_ptr<PlayerInfo> connection = nullptr;
@@ -87,7 +88,7 @@ struct RoomContext {
   void broadcast_ex(const int seat_idx, const str_v& code,
                     const opt<str>& payload);
   void send_to(const int seat_idx, const str_v& code, const opt<str>& payload);
-  str serialize() const;
+  str serialize(usize seat_idx) const;
 };
 
 class RoomState {

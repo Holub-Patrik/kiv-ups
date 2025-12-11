@@ -42,7 +42,7 @@ private:
 
   void process_player_messages(PlayerInfo& player, Result& res) {
     for (usize i = 0; i < MSG_BATCH_SIZE; i++) {
-      auto msg_opt = player.msg_client.reader.read();
+      auto msg_opt = player.reader.read();
       if (!msg_opt)
         break; // No more messages
 

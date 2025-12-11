@@ -26,8 +26,8 @@ enum class PlayerState {
 
 class PlayerInfo final {
 private:
-  CB::TwinBuffer<Net::MsgStruct, 128> msg_buf;
-  CB::Server<Net::MsgStruct, 128> msg_server;
+  CB::Buffer<Net::MsgStruct, 128> msg_buf;
+  CB::Writer<Net::MsgStruct, 128> writer;
 
   std::thread send_t;
 
@@ -43,7 +43,7 @@ public:
   u64 chips;
 
   PlayerState state = PlayerState::Connected;
-  CB::Client<Net::MsgStruct, 128> msg_client;
+  CB::Reader<Net::MsgStruct, 128> reader;
   Net::Serde::MainParser parser{};
   RemoteSocket sock;
 
@@ -53,7 +53,7 @@ public:
   }
 
   PlayerInfo(const ServerSocket& server_sock)
-      : sock(server_sock), msg_server(msg_buf), msg_client(msg_buf) {
+      : sock(server_sock), reader(msg_buf), writer(msg_buf) {
     send_t = std::thread{&PlayerInfo::accept_messages, this};
   }
 
@@ -130,8 +130,7 @@ public:
           } else if (results.code == "PING") {
             ping_received = true;
           } else {
-            msg_server.writer.wait_and_insert(
-                Net::MsgStruct{results.code, payload});
+            writer.wait_and_insert(Net::MsgStruct{results.code, payload});
           }
 
           total_parsed_bytes += results.bytes_parsed;
